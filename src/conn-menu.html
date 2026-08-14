@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+  />
+  <title>断开连接</title>
+  <style>
+    /* 与 shell 标题栏同一套 DSH 设计 token */
+    :root {
+      --ds-bg: #1b1b1f;               /* 比标题栏略实，保证菜单在 DSH 内容上的可读性 */
+      --ds-border: rgba(255, 255, 255, 0.1);
+      --ds-text: rgb(235, 238, 242);
+      --ds-text-dim: rgb(151, 157, 166);
+      --ds-hover: rgba(255, 255, 255, 0.08);
+      --ds-ease: cubic-bezier(0.4, 0, 0.2, 1);
+      --ds-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+        'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    }
+    body[data-theme="light"] {
+      --ds-bg: #ffffff;
+      --ds-border: rgba(0, 0, 0, 0.1);
+      --ds-text: rgb(15, 17, 21);
+      --ds-text-dim: rgb(97, 102, 107);
+      --ds-hover: rgba(0, 0, 0, 0.05);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: var(--ds-font);
+      color: var(--ds-text);
+      background: transparent;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+      -webkit-user-select: none;
+      overflow: hidden;
+      border-radius: 10px;
+    }
+
+    .menu {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 6px;
+      min-width: 230px;
+      background: var(--ds-bg);
+      border: 1px solid var(--ds-border);
+      border-radius: 10px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    }
+    .item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      font-size: 12.5px;
+      line-height: 18px;
+      color: var(--ds-text);
+      background: transparent;
+      border: none;
+      border-radius: 7px;
+      padding: 8px 10px;
+      cursor: pointer;
+      white-space: nowrap;
+      outline: none;
+      transition: background var(--ds-ease) 0.15s;
+    }
+    .item:hover { background: var(--ds-hover); }
+    .item.danger { color: #ef4444; }
+    .item.danger:hover { background: rgba(239, 68, 68, 0.12); }
+    .item[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <div class="menu" id="menu">
+    <button class="item" id="disconnect">断开连接（返回登录界面，服务保持运行）</button>
+    <button class="item danger" id="disconnect-stop" hidden>断开连接并关闭本地服务</button>
+  </div>
+  <script>
+    (function () {
+      var dark = new URLSearchParams(location.search).get('dark') !== '0';
+      document.body.setAttribute('data-theme', dark ? 'dark' : 'light');
+      // 主题跟随 shell 页面（菜单窗口打开时由主进程推送最新值）
+      if (window.shellWindow && window.shellWindow.onThemeChange) {
+        window.shellWindow.onThemeChange(function (isDark) {
+          document.body.setAttribute('data-theme', isDark ? 'dark' : 'light');
+        });
+      }
+      var stopBtn = document.getElementById('disconnect-stop');
+      if (window.shellWindow && window.shellWindow.menu && window.shellWindow.menu.onState) {
+        window.shellWindow.menu.onState(function (s) {
+          if (s && typeof s.dark === 'boolean') {
+            document.body.setAttribute('data-theme', s.dark ? 'dark' : 'light');
+          }
+          stopBtn.hidden = !(s && s.owned);
+        });
+      }
+      document.getElementById('disconnect').addEventListener('click', function () {
+        window.shellWindow.menu.disconnect();
+      });
+      stopBtn.addEventListener('click', function () {
+        window.shellWindow.menu.disconnectAndClose();
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') window.shellWindow.menu.close();
+      });
+    })();
+  </script>
+</body>
+</html>

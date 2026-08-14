@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeRecentServers, sanitizeBounds, type WindowBounds } from './shell-state';
+import { mergeRecentServers, removeRecentServer, clearRecentServers, sanitizeBounds, type WindowBounds } from './shell-state';
 
 const DISPLAYS = [
   { x: 0, y: 0, width: 1920, height: 1080 },
@@ -35,6 +35,31 @@ describe('mergeRecentServers', () => {
       'http://3/',
       'http://4/',
     ]);
+  });
+});
+
+describe('removeRecentServer / clearRecentServers', () => {
+  const list = ['http://a/', 'http://b/', 'http://c/'];
+
+  it('删除单条记录', () => {
+    expect(removeRecentServer(list, 'http://b/')).toEqual(['http://a/', 'http://c/']);
+  });
+
+  it('删除不存在的记录时列表不变', () => {
+    expect(removeRecentServer(list, 'http://nope/')).toEqual(list);
+  });
+
+  it('删除最后一条后为空列表', () => {
+    expect(removeRecentServer(['http://a/'], 'http://a/')).toEqual([]);
+  });
+
+  it('空历史删除为幂等空列表', () => {
+    expect(removeRecentServer(undefined, 'http://a/')).toEqual([]);
+    expect(removeRecentServer([], 'http://a/')).toEqual([]);
+  });
+
+  it('清空全部记录', () => {
+    expect(clearRecentServers()).toEqual([]);
   });
 });
 

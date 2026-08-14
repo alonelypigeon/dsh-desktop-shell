@@ -4,6 +4,26 @@
 （dsh-plugin-desktop-control / dsh-plugin-balance-panel / dsh-plugin-session-outline）
 已拆分为独立仓库，各自维护版本与变更记录。
 
+## [0.4.0] - 2026-08-15
+
+### 修复
+
+- **断开连接下拉菜单被 DSH 内容视图遮挡（渲染为空）**：连接后 DSH 页面跑在
+  `WebContentsView` 里，始终合成在 shell 页面之上，标题栏内的绝对定位弹层
+  一旦延伸到标题栏下方就会被整块盖住。菜单改为**独立子窗口**
+  （`conn-menu.html`，frameless + transparent + 父窗口置顶），并修正为
+  `showInactive()` 打开 —— **不再抢键盘焦点**，避免「菜单打开后所有按键失灵」；
+  点击主窗口任意处 / Esc / 菜单失焦 / 父窗口移动缩放隐藏都会自动收起。
+
+### 新增
+
+- **login 界面登录记录管理**：最近连接列表每条记录带「×」删除按钮、
+  头部「清除全部」按钮（IPC `login:remove-recent` / `login:clear-recent`，
+  纯函数 `removeRecentServer` / `clearRecentServers` 可测）。
+- **按钮样式与 DSH 风格统一**：新增 `ghost-btn` / `icon-btn` 组件样式
+  （透明底 + 描边 + 悬停底色，主操作色沿用品牌蓝，危险操作用红色系），
+  与 DSH 设计平台的按钮交互一致。
+
 ## [0.3.0] - 2026-08-15
 
 ### 新增

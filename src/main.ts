@@ -22,7 +22,8 @@ import { loadSharedConfig, saveSharedConfig, watchSharedConfig, migrateLegacyCon
 import { sniffLocalDsh } from './sniffer';
 import { readDshThemePreference, resolveIsDark, onSystemThemeChange, watchDshTheme } from './theme';
 import { setupAutoUpdater, checkForUpdatesNow } from './updater';
-import { loadShellState, saveShellState, mergeRecentServers, sanitizeBounds } from './shell-state';
+import { loadShellState, saveShellState, mergeRecentServers, removeRecentServer, clearRecentServers, sanitizeBounds } from './shell-state';
+import { createConnMenu, type ConnMenu } from './conn-menu';
 import { parseDshShellUrl, PROTOCOL_SCHEME } from './protocol';
 
 const TITLEBAR_HEIGHT = 42;
@@ -49,6 +50,8 @@ let alwaysOnTop = false;
 let boundsSaveTimer: NodeJS.Timeout | null = null;
 let recentServers: string[] = [];
 let pendingProtocolUrl: string | null = null; // macOS 冷启动时 open-url 可能先于 ready 到达
+// 断开连接下拉菜单（独立小窗，见 conn-menu.ts）
+let connMenu: ConnMenu | null = null;
 
 function shellStateFile(): string {
   return path.join(app.getPath('userData'), 'shell-state.json');
@@ -235,6 +238,12 @@ function createShellWindow(): void {
   win.on('move', scheduleBoundsSave);
   win.on('show', updateTrayMenu);
   win.on('hide', updateTrayMenu);
+  // 窗口真正销毁时连带销毁断开连接菜单（move/resize/hide 时菜单在
+  // conn-menu.ts 内自行收起）
+  win.on('closed', () => {
+    connMenu?.destroy();
+    connMenu = null;
+  });
 
   setupWindowControlIpc(win);
   setupLoginIpc(win);
@@ -381,6 +390,59 @@ function setupLoginIpc(win: BrowserWindow): void {
     if (!guard(e)) return;
     win.webContents.send('login:recent-result', recentServers);
   });
+
+  // 删除一条最近连接记录（login 界面 × 按钮）
+  ipcMain.on('login:remove-recent', (e, rawUrl: unknown) => {
+    if (!guard(e)) return;
+    const url = typeof rawUrl === 'string' ? rawUrl : '';
+    if (!url) return;
+    recentServers = removeRecentServer(recentServers, url);
+    saveShellState(shellStateFile(), { recentServers });
+    win.webContents.send('login:recent-result', recentServers);
+  });
+
+  // 清空最近连接记录（login 界面「清除全部」）
+  ipcMain.on('login:clear-recent', (e) => {
+    if (!guard(e)) return;
+    recentServers = clearRecentServers();
+    saveShellState(shellStateFile(), { recentServers });
+    win.webContents.send('login:recent-result', recentServers);
+  });
+
+  // 打开/关闭断开连接下拉菜单（conn-menu.html 独立小窗）
+  ipcMain.on('shell:conn-menu-open', (e, anchor: unknown) => {
+    if (!guard(e)) return;
+    if (!anchor || typeof anchor !== 'object') return;
+    const r = anchor as { x?: unknown; y?: unknown; width?: unknown; height?: unknown };
+    if (
+      typeof r.x !== 'number' ||
+      typeof r.y !== 'number' ||
+      typeof r.width !== 'number' ||
+      typeof r.height !== 'number'
+    ) {
+      return;
+    }
+    openConnMenu({ x: r.x, y: r.y, width: r.width, height: r.height });
+  });
+  ipcMain.on('shell:conn-menu-close', (e) => {
+    if (!guard(e)) return;
+    connMenu?.close();
+  });
+}
+
+// 打开断开连接下拉菜单：懒创建子窗口，锚定在标题栏按钮正下方。
+function openConnMenu(anchor: Electron.Rectangle): void {
+  if (!shellWindow) return;
+  if (!connMenu) {
+    connMenu = createConnMenu(shellWindow, {
+      disconnect: () => disconnectConnection(),
+      disconnectAndStop: () => disconnectAndStop(),
+    });
+  }
+  connMenu.open(anchor, {
+    owned: !!ownedDsh && ownedDsh.url === connectedUrl,
+    dark: currentThemeDark ?? resolveIsDark(readDshThemePreference()),
+  });
 }
 
 // 校验 + 确认 + 连接一条 URL；非回环地址弹确认（深链触发的远程地址同样受保护）。
@@ -499,6 +561,7 @@ function stopLocalService(): void {
 // 断开连接：回到 login 界面；本应用启动的本地服务保持后台运行（可再嗅探连接）。
 // 显式断开会清掉共享配置里的 url，避免下次启动自动重连到同一服务器。
 function disconnectConnection(): void {
+  connMenu?.close();
   detachContentView();
   saveSharedConfig({ url: undefined });
   showWindow();
@@ -506,6 +569,7 @@ function disconnectConnection(): void {
 
 // 断开连接并关闭：若当前连接的是本应用启动的本地服务，一并停止它。
 function disconnectAndStop(): void {
+  connMenu?.close();
   const url = connectedUrl;
   detachContentView();
   if (ownedDsh && ownedDsh.url === url) {

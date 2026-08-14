@@ -115,35 +115,7 @@
       white-space: nowrap;
     }
     .conn-btn:hover { background: var(--ds-hover); color: var(--ds-text); border-color: var(--ds-brand); }
-    .conn-pop {
-      position: absolute;
-      top: calc(100% + 6px);
-      right: 0;
-      min-width: 230px;
-      background: var(--ds-bg);
-      border: 1px solid var(--ds-border);
-      border-radius: 10px;
-      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-      padding: 6px;
-      z-index: 100;
-      display: flex;
-      flex-direction: column;
-    }
-    .conn-pop[hidden] { display: none; }
-    .conn-item {
-      text-align: left;
-      font-size: 12.5px;
-      color: var(--ds-text);
-      background: transparent;
-      border: none;
-      border-radius: 7px;
-      padding: 8px 10px;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    .conn-item:hover { background: var(--ds-hover); }
-    .conn-item.danger { color: #ef4444; }
-    .conn-item.danger:hover { background: rgba(239, 68, 68, 0.12); }
+    .conn-btn.open { background: var(--ds-hover); color: var(--ds-text); border-color: var(--ds-brand); }
     .controls {
       display: flex;
       align-items: stretch;
@@ -307,6 +279,51 @@
     }
     .status .inst:hover { border-color: var(--ds-brand); background: var(--ds-hover); }
     .status .inst b { color: var(--ds-brand); font-weight: 600; }
+
+    /* —— 最近连接：头部（标题 + 清除全部）+ 行（链接 + 删除）——
+       按钮样式与 DSH 设计平台一致：ghost 按钮（透明底 + 悬停底色）、
+       图标按钮（描边 + 悬停高亮），主操作色沿用 --ds-brand。 */
+    .recent-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 4px 0 2px;
+    }
+    .recent-head .recent-title { margin: 0; }
+    .ghost-btn {
+      font-size: 12px;
+      color: var(--ds-text-dim);
+      background: transparent;
+      border: 1px solid var(--ds-border);
+      border-radius: 7px;
+      padding: 3px 10px;
+      cursor: pointer;
+      transition: background var(--ds-ease) 0.15s, color var(--ds-ease) 0.15s, border-color var(--ds-ease) 0.15s;
+      outline: none;
+      white-space: nowrap;
+    }
+    .ghost-btn:hover { background: var(--ds-hover); color: var(--ds-text); border-color: var(--ds-brand); }
+    .recent-row { display: flex; gap: 6px; align-items: stretch; }
+    .recent-row .inst { flex: 1; min-width: 0; margin-top: 6px; }
+    .icon-btn {
+      flex: none;
+      align-self: stretch;
+      margin-top: 6px;
+      min-width: 30px;
+      border: 1px solid var(--ds-border);
+      background: transparent;
+      color: var(--ds-text-dim);
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 15px;
+      line-height: 1;
+      padding: 0 8px;
+      transition: background var(--ds-ease) 0.15s, color var(--ds-ease) 0.15s, border-color var(--ds-ease) 0.15s;
+      outline: none;
+    }
+    .icon-btn:hover { background: var(--ds-hover); color: var(--ds-text); border-color: var(--ds-brand); }
+    .icon-btn.danger:hover { background: rgba(239, 68, 68, 0.12); color: #ef4444; border-color: rgba(239, 68, 68, 0.4); }
   </style>
 </head>
 <body>
@@ -317,13 +334,7 @@
     </div>
     <div class="conn" id="conn" hidden>
       <span class="conn-url" id="conn-url"></span>
-      <div class="conn-dd">
-        <button class="conn-btn" id="conn-toggle" title="断开连接">断开连接 ▾</button>
-        <div class="conn-pop" id="conn-pop" hidden>
-          <button class="conn-item" id="conn-disconnect">断开连接（返回登录界面，服务保持运行）</button>
-          <button class="conn-item danger" id="conn-disconnect-stop" hidden>断开连接并关闭本地服务</button>
-        </div>
-      </div>
+      <button class="conn-btn" id="conn-toggle" title="断开连接">断开连接 ▾</button>
     </div>
     <div class="controls">
       <button id="min" title="最小化" aria-label="最小化">
@@ -419,33 +430,45 @@
         icoRestore.style.display = isMax ? 'block' : 'none';
       });
 
-      // —— 已连接状态 + 断开连接菜单 ——
+      // —— 已连接状态 + 断开连接菜单（独立小窗 conn-menu.html，避免被
+      //    DSH 内容视图遮挡）——
       var connEl = document.getElementById('conn');
       var connUrlEl = document.getElementById('conn-url');
-      var connPop = document.getElementById('conn-pop');
       var connToggle = document.getElementById('conn-toggle');
-      var connDisconnect = document.getElementById('conn-disconnect');
-      var connDisconnectStop = document.getElementById('conn-disconnect-stop');
-      function closeConnPop() { connPop.hidden = true; }
+      var menuOpen = false;
       window.shellWindow.onConnectionChange(function (s) {
         connEl.hidden = !s.connected;
         connUrlEl.textContent = s.url || '';
-        connDisconnectStop.hidden = !s.owned;
-        closeConnPop();
+        menuOpen = false;
+        connToggle.classList.remove('open');
+        if (window.shellWindow.connMenu) window.shellWindow.connMenu.close();
       });
-      connToggle.addEventListener('click', function (e) {
-        e.stopPropagation();
-        connPop.hidden = !connPop.hidden;
+      // 菜单小窗关闭时同步按钮状态（失焦/点菜单项/父窗口移动都会触发）
+      if (window.shellWindow.connMenu) {
+        window.shellWindow.connMenu.onClosed(function () {
+          menuOpen = false;
+          connToggle.classList.remove('open');
+        });
+      }
+      connToggle.addEventListener('click', function () {
+        if (menuOpen) {
+          window.shellWindow.connMenu.close();
+          return;
+        }
+        var r = connToggle.getBoundingClientRect();
+        window.shellWindow.connMenu.open({ x: r.x, y: r.y, width: r.width, height: r.height });
+        menuOpen = true;
+        connToggle.classList.add('open');
       });
-      connDisconnect.addEventListener('click', function () {
-        closeConnPop();
-        window.shellWindow.disconnect();
+      // 点击主窗口其他任意处（除按钮自身）→ 收起菜单
+      document.addEventListener('mousedown', function (e) {
+        if (e.target === connToggle || connToggle.contains(e.target)) return;
+        if (menuOpen) window.shellWindow.connMenu.close();
       });
-      connDisconnectStop.addEventListener('click', function () {
-        closeConnPop();
-        window.shellWindow.disconnectAndClose();
+      // Esc 收起菜单（菜单小窗不抢焦点，Esc 落在主窗口）
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && menuOpen) window.shellWindow.connMenu.close();
       });
-      document.addEventListener('click', function () { closeConnPop(); });
 
       // —— login 交互 ——
       var cards = document.getElementById('cards');
@@ -489,22 +512,42 @@
         connectBtn.textContent = busy ? '连接中…' : '连接';
       }
 
-      // —— 最近连接 ——
+      // —— 最近连接（点击重连；× 删除单条；清除全部）——
       var recentEl = document.getElementById('recent');
       function renderRecent(list) {
         recentEl.textContent = '';
         recentEl.hidden = !list || list.length === 0;
         if (!list || list.length === 0) return;
-        var title = document.createElement('div');
+        var head = document.createElement('div');
+        head.className = 'recent-head';
+        var title = document.createElement('span');
         title.className = 'recent-title';
         title.textContent = '最近连接（点击重连）';
-        recentEl.appendChild(title);
+        head.appendChild(title);
+        var clearBtn = document.createElement('button');
+        clearBtn.className = 'ghost-btn';
+        clearBtn.textContent = '清除全部';
+        clearBtn.title = '删除全部登录记录';
+        clearBtn.addEventListener('click', function () { window.shellWindow.login.clearRecent(); });
+        head.appendChild(clearBtn);
+        recentEl.appendChild(head);
         list.forEach(function (url) {
+          var row = document.createElement('div');
+          row.className = 'recent-row';
           var b = document.createElement('button');
           b.className = 'inst';
           b.textContent = url;
+          b.title = '点击连接 ' + url;
           b.addEventListener('click', function () { window.shellWindow.login.joinRemote(url); });
-          recentEl.appendChild(b);
+          row.appendChild(b);
+          var del = document.createElement('button');
+          del.className = 'icon-btn danger';
+          del.textContent = '×';
+          del.title = '删除该记录';
+          del.setAttribute('aria-label', '删除记录 ' + url);
+          del.addEventListener('click', function () { window.shellWindow.login.removeRecent(url); });
+          row.appendChild(del);
+          recentEl.appendChild(row);
         });
       }
       window.shellWindow.login.onRecentResult(renderRecent);

@@ -50,6 +50,16 @@ export function mergeRecentServers(prev: string[] | undefined, url: string, cap 
   return next.slice(0, cap);
 }
 
+// 删除一条最近连接记录（login 界面 × 按钮）。
+export function removeRecentServer(prev: string[] | undefined, url: string): string[] {
+  return (prev ?? []).filter((u) => u !== url);
+}
+
+// 清空最近连接记录。
+export function clearRecentServers(): string[] {
+  return [];
+}
+
 export function loadShellState(file: string): ShellState {
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as Partial<ShellState>;
