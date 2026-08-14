@@ -30,8 +30,8 @@ compression: maximum
 # 无原生依赖，跳过 electron-rebuild（它会在打包时 fork 子进程）。
 npmRebuild: false
 
-# 直接复用已下载的 electron 运行时，避免打包时再次下载/写全局缓存。
-electronDist: node_modules/electron/dist
+# 注意：不设 electronDist 覆盖。本机 node_modules/electron/dist 存在时会直接复用，
+# CI 上（electron postinstall 可能被跳过）electron-builder 会自行下载对应平台的运行时。
 
 # 二进制加固（@electron/fuses，electron-builder 内置支持）：
 # 关闭以 Electron 二进制冒充 node / 注入 node 选项 / 远程调试参数的能力，
