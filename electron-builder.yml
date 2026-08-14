@@ -17,8 +17,8 @@ publish:
   provider: github
   owner: alonelypigeon
   repo: dsh-desktop-shell
-  # 测试期发布均为 pre-release（正式版发布时移除或改为 false）。
-  prerelease: true
+  # 测试期发布均为 pre-release（正式版发布时改为 release）。
+  releaseType: prerelease
 
 files:
   - dist/**/*
