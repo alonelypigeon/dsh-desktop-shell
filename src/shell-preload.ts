@@ -12,11 +12,21 @@ contextBridge.exposeInMainWorld('shellWindow', {
   onThemeChange: (cb: (isDark: boolean) => void): void => {
     ipcRenderer.on('shell:theme-changed', (_e, v: boolean) => cb(v));
   },
+  // 连接状态（connected / url / owned）变化
+  onConnectionChange: (cb: (s: { connected: boolean; url: string | null; owned: boolean }) => void): void => {
+    ipcRenderer.on('shell:connection-changed', (_e, v: { connected: boolean; url: string | null; owned: boolean }) =>
+      cb(v),
+    );
+  },
+  // 断开连接（本地服务保持运行）
+  disconnect: (): void => ipcRenderer.send('shell:disconnect'),
+  // 断开连接并关闭（若为本应用启动的本地服务则一并停止）
+  disconnectAndClose: (): void => ipcRenderer.send('shell:disconnect-stop'),
   login: {
     // 本地嗅探
     sniff: (): void => ipcRenderer.send('login:sniff'),
-    // GUI 启动本地服务器
-    startLocal: (): void => ipcRenderer.send('login:start-local'),
+    // GUI 启动本地服务器（可指定端口，空/缺省为随机端口）
+    startLocal: (port?: number | string): void => ipcRenderer.send('login:start-local', port),
     // 连接指定 URL（云端/嗅探结果点击）
     joinRemote: (url: string): void => ipcRenderer.send('login:join-remote', url),
     // 最近连接列表（请求 / 订阅）

@@ -100,12 +100,31 @@ export type DshLaunchPhase = 'starting' | 'found' | 'ready' | 'failed';
 export interface DshLaunchOptions {
   onProgress?: (phase: DshLaunchPhase, detail?: string) => void;
   timeoutMs?: number;
+  /** 指定监听端口；缺省/0 表示随机端口。 */
+  port?: number;
 }
 
-// 自动启动一个本地 dsh web 实例（随机回环端口）并嗅探其就绪 URL。
+// 校验 GUI 传入的端口输入。返回：
+//   0       未指定或显式 0（自动选择随机端口）
+//   1-65535 合法端口
+//   null    非法输入（调用方应提示用户）
+export function normalizeRequestedPort(raw: unknown): number | null {
+  if (raw === undefined || raw === null) return 0;
+  if (typeof raw !== 'string' && typeof raw !== 'number') return null;
+  const s = String(raw).trim();
+  if (s === '') return 0;
+  if (!/^\d{1,5}$/.test(s)) return null;
+  const n = Number(s);
+  if (n === 0) return 0;
+  if (!Number.isInteger(n) || n < 1 || n > 65535) return null;
+  return n;
+}
+
+// 自动启动一个本地 dsh web 实例并嗅探其就绪 URL。
+// 默认随机回环端口；指定 port 时尝试监听该端口（被占用会启动失败并带上 stderr 提示）。
 // 返回 null 表示无法启动（找不到 dsh、启动失败或超时）。
 export async function launchLocalDsh(options: DshLaunchOptions = {}): Promise<DshService | null> {
-  const { onProgress, timeoutMs = 30000 } = options;
+  const { onProgress, timeoutMs = 30000, port = 0 } = options;
 
   const dshBin = resolveDshBin();
   if (!dshBin) {
@@ -123,7 +142,7 @@ export async function launchLocalDsh(options: DshLaunchOptions = {}): Promise<Ds
 
     let child: ChildProcess;
     const env = { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' };
-    const args = ['web', '--host', '127.0.0.1', '--port', '0'];
+    const args = ['web', '--host', '127.0.0.1', '--port', String(port)];
 
     try {
       if (isCmd) {
@@ -151,6 +170,8 @@ export async function launchLocalDsh(options: DshLaunchOptions = {}): Promise<Ds
     let settled = false;
     let buffer = '';
     let url: string | null = null;
+    // 收集 stderr 尾部，启动失败（如指定端口被占用）时带给用户可读的原因。
+    let stderrTail = '';
 
     const cleanup = (): void => {
       if (settled) return;
@@ -159,13 +180,20 @@ export async function launchLocalDsh(options: DshLaunchOptions = {}): Promise<Ds
       child.stderr?.removeAllListeners('data');
     };
 
+    const withStderr = (base: string): string => {
+      const tail = stderrTail.trim();
+      if (!tail) return base;
+      const lines = tail.split(/\r?\n/).filter(Boolean);
+      return `${base}\n${lines.slice(-2).join('\n')}`;
+    };
+
     const finish = (result: DshService | null, failDetail?: string): void => {
       cleanup();
       if (result) {
         onProgress?.('ready', result.url);
         resolve({ url: result.url, stop: result.stop });
       } else {
-        onProgress?.('failed', failDetail ?? 'dsh 启动失败或超时');
+        onProgress?.('failed', withStderr(failDetail ?? 'dsh 启动失败或超时'));
         try {
           child.kill();
         } catch {
@@ -190,8 +218,8 @@ export async function launchLocalDsh(options: DshLaunchOptions = {}): Promise<Ds
       }
     });
 
-    child.stderr?.on('data', (_c: Buffer) => {
-      /* 收集但不影响就绪判断 */
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderrTail = (stderrTail + chunk.toString()).slice(-4000);
     });
 
     child.on('error', () => finish(null, 'dsh 子进程启动出错'));

@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop-shell",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Clean tray-resident desktop shell for the DeepSeek Harness Web GUI — point it at your own dsh web, no bundled runtime",
   "main": "dist/main.js",
   "author": "dsh-desktop-shell contributors",

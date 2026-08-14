@@ -15,7 +15,7 @@ import {
 import * as path from 'node:path';
 import { resolveConfiguredUrl } from './config';
 import { validateUrl } from './url';
-import { launchLocalDsh, type DshService } from './dsh-launcher';
+import { launchLocalDsh, normalizeRequestedPort, type DshService } from './dsh-launcher';
 import { probeUrl } from './probe';
 import { attachSecurity } from './security';
 import { loadSharedConfig, saveSharedConfig, watchSharedConfig, migrateLegacyConfig } from './shared-config';
@@ -273,6 +273,16 @@ function attachContentView(url: string): void {
   updateContentViewBounds();
   connectedUrl = url;
   shellWindow.webContents.send('login:visible', false);
+  sendConnectionState();
+}
+
+// 向标题栏同步连接状态（连接地址 + 是否为本应用启动的本地服务）。
+function sendConnectionState(): void {
+  shellWindow?.webContents.send('shell:connection-changed', {
+    connected: connectedUrl !== null,
+    url: connectedUrl,
+    owned: !!ownedDsh && ownedDsh.url === connectedUrl,
+  });
 }
 
 // 移除 DSH 内容视图，重新显示 login 界面（切换服务器）。
@@ -289,6 +299,7 @@ function detachContentView(): void {
   }
   shellWindow?.webContents.send('login:visible', true);
   shellWindow?.webContents.send('login:recent-result', recentServers);
+  sendConnectionState();
   updateTrayMenu();
 }
 
@@ -336,15 +347,33 @@ function setupLoginIpc(win: BrowserWindow): void {
   });
 
   // GUI 启动本地服务器（login 界面按钮与托盘「管理服务器」共用）
-  ipcMain.on('login:start-local', (e) => {
+  // 第二个参数是可选端口（字符串/数字，空表示随机端口）。
+  ipcMain.on('login:start-local', (e, port: unknown) => {
     if (!guard(e)) return;
-    void startLocalService(win);
+    const normalized = normalizeRequestedPort(port);
+    if (normalized === null) {
+      showLoginError('端口无效：请输入 1-65535 之间的整数');
+      return;
+    }
+    void startLocalService(win, normalized);
   });
 
   // 连接指定 URL（云端输入 / 嗅探结果点击 / 深链协议共用）
   ipcMain.on('login:join-remote', (e, rawUrl: unknown) => {
     if (!guard(e)) return;
     void joinRemoteUrl(typeof rawUrl === 'string' ? rawUrl : '');
+  });
+
+  // 断开连接（返回 login 界面；本应用启动的本地服务保持运行）
+  ipcMain.on('shell:disconnect', (e) => {
+    if (!guard(e)) return;
+    disconnectConnection();
+  });
+
+  // 断开连接并关闭：若连着的是本应用启动的本地服务，一并停止
+  ipcMain.on('shell:disconnect-stop', (e) => {
+    if (!guard(e)) return;
+    disconnectAndStop();
   });
 
   // 最近连接列表（login 界面展示）
@@ -413,8 +442,9 @@ async function connectTo(url: string): Promise<boolean> {
 
 // —— 本地服务管理（login IPC 与托盘「管理服务器」共用） ——
 
-// 启动本地 DSH 服务并连接；进度消息发送给 login 界面（窗口隐藏时无害）。
-async function startLocalService(win: BrowserWindow | null): Promise<void> {
+// 启动本地 DSH 服务并连接；progress 消息发送给 login 界面（窗口隐藏时无害）。
+// port: 0 表示随机端口（GUI 未指定时）。
+async function startLocalService(win: BrowserWindow | null, port = 0): Promise<void> {
   // 已经在运行（本应用启动的）→ 直接复用
   if (ownedDsh) {
     win?.webContents.send('login:progress', `本地实例已在运行：${ownedDsh.url}`);
@@ -423,6 +453,7 @@ async function startLocalService(win: BrowserWindow | null): Promise<void> {
     return;
   }
   const service = await launchLocalDsh({
+    port,
     onProgress: (phase, detail) => {
       const msg =
         phase === 'found'
@@ -463,6 +494,28 @@ function stopLocalService(): void {
   });
 }
 
+// —— 断开连接（login IPC 与托盘菜单共用） ——
+
+// 断开连接：回到 login 界面；本应用启动的本地服务保持后台运行（可再嗅探连接）。
+// 显式断开会清掉共享配置里的 url，避免下次启动自动重连到同一服务器。
+function disconnectConnection(): void {
+  detachContentView();
+  saveSharedConfig({ url: undefined });
+  showWindow();
+}
+
+// 断开连接并关闭：若当前连接的是本应用启动的本地服务，一并停止它。
+function disconnectAndStop(): void {
+  const url = connectedUrl;
+  detachContentView();
+  if (ownedDsh && ownedDsh.url === url) {
+    ownedDsh.stop();
+    ownedDsh = null;
+  }
+  saveSharedConfig({ url: undefined });
+  showWindow();
+}
+
 // —— 托盘 ——
 
 function createTrayMenu(): Electron.Menu {
@@ -495,12 +548,16 @@ function createTrayMenu(): Electron.Menu {
     },
   ];
 
-  // 已连接时：在浏览器里打开当前服务器
+  // 已连接时：在浏览器里打开当前服务器 / 断开连接
   if (connectedUrl) {
     template.push({
       label: '在浏览器中打开当前服务器',
       click: () => void shell.openExternal(connectedUrl!),
     });
+    template.push({ label: '断开连接', click: () => disconnectConnection() });
+    if (ownedDsh && ownedDsh.url === connectedUrl) {
+      template.push({ label: '断开连接并关闭本地服务', click: () => disconnectAndStop() });
+    }
   }
 
   template.push(
