@@ -77,18 +77,19 @@ npm run test:node           # Node 原生 runner（scripts/verify-url.mjs，不�
 ## 发布清单
 
 1. **版本号**：同步更新 `package.json` 与 [`CHANGELOG.md`](CHANGELOG.md)。
-2. **更新源**：把 [`electron-builder.yml`](electron-builder.yml) 的 `publish.url`
-   从 `example.com` 占位符改成真实更新服务器（或运行时设 `DSH_UPDATE_URL`）。
-   占位符状态下打包版不会发起无效的启动时检查。
+2. **更新源**：已配置为 GitHub Releases（`publish.github` → `alonelypigeon/dsh-desktop-shell`）。
+   发布时打 `v0.2.0` 这类 tag 并上传产物到 Release 即可；如需自建服务器，
+   改回 `publish.generic` 或运行时设 `DSH_UPDATE_URL`。
 3. **图标/元数据**：`build/` 下的图标已就位；`linux.maintainer`、`copyright`
    发布前改成你自己的信息。
 4. **签名/公证**：Windows SmartScreen 与 macOS Gatekeeper 会警告未签名安装包；
    有证书后配置 `win.certificateFile` / `mac.notarize`。
    macOS 的自动更新要求签名 + 公证后的构建。
-5. **CI**：仓库推上 GitHub 后启用 [`.github/workflows/release.yml`](.github/workflows/release.yml)
-   （打 tag 自动构建三平台并上传 Release）。
+5. **CI**：[`.github/workflows/release.yml`](.github/workflows/release.yml)
+   打 `v*` tag 自动构建三平台并 `--publish always` 上传到 Release。
 6. **产物**：`npm run dist:win`（NSIS + portable，建议分开执行）、
-   `dist:mac`、`dist:linux`；上传 `latest.yml` 与安装包到更新服务器根目录。
+   `dist:mac`、`dist:linux`；`electron-builder --publish always` 自动上传
+   `latest.yml` 与安装包到 Release（或手动 `gh release create`）。
 7. **冒烟**：装完安装包后确认托盘图标、本地服务启动/停止、断线重连、
    `/desktop` 命令族与更新流程。
 
@@ -106,9 +107,8 @@ npm run dist:linux   # AppImage + deb
 
 ### 自动更新
 
-- 更新源在 [`electron-builder.yml`](electron-builder.yml) 的 `publish` 段（generic provider）；发布前改成你自己的服务器，或运行时用 `DSH_UPDATE_URL` 覆盖。
-- 上传产物时用 `electron-builder --publish always`，或手动把 `latest.yml` 与安装包一起放到更新服务器根目录。
-- 打包版启动时若发现更新源仍是 `example.com` 占位符，会跳过自动检查；`/desktop update` 显式触发的检查仍会发起，失败会被静默忽略（配置真实更新源后生效）。
+- 更新源在 [`electron-builder.yml`](electron-builder.yml) 的 `publish` 段（GitHub Releases provider，指向 `alonelypigeon/dsh-desktop-shell`）；需要自建服务器时可改回 generic，或运行时用 `DSH_UPDATE_URL` 覆盖。
+- 上传产物：`electron-builder --publish always`（需要 `GH_TOKEN` 或 GitHub Actions 默认 token），或手动 `gh release create vX.Y.Z release/*`。
 - 已知限制：Windows portable 单文件版不支持自动更新（请用 NSIS 安装版）。
 
 ## 目录结构

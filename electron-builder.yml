@@ -6,16 +6,19 @@ directories:
   output: release
   buildResources: build
 
-# 自动更新源（generic provider）。发布时请把 URL 改成你自己的更新服务器；
-# 运行时也可用 DSH_UPDATE_URL 环境变量覆盖。
-# 如果你有 GitHub 仓库，可改用 github provider：
+# 自动更新源：GitHub Releases（public 仓库已配置）。
+# electron-builder --publish always 会把 latest.yml + 安装包上传到 Release，
+# 应用侧 electron-updater 通过 GitHub API 检查更新（无需自建服务器）。
+# 如需换回自建服务器，改为：
 #   publish:
-#     provider: github
-#     owner: <your-account>
-#     repo: <your-repo>
+#     provider: generic
+#     url: https://your-server.example/dsh-desktop-shell/updates/
 publish:
-  provider: generic
-  url: https://example.com/dsh-desktop-shell/updates/
+  provider: github
+  owner: alonelypigeon
+  repo: dsh-desktop-shell
+  # 测试期发布均为 pre-release（正式版发布时移除或改为 false）。
+  prerelease: true
 
 files:
   - dist/**/*

@@ -4,7 +4,7 @@
 （dsh-plugin-desktop-control / dsh-plugin-balance-panel / dsh-plugin-session-outline）
 已拆分为独立仓库，各自维护版本与变更记录。
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-08-14
 
 ### 新增（参考竞品桌面应用常见能力）
 
