@@ -17,7 +17,7 @@
     "test": "npm run test:unit && npm run test:node",
     "test:unit": "vitest run",
     "test:watch": "vitest",
-    "test:node": "npm run build:ts && node --test --test-isolation=none scripts/verify-url.mjs",
+    "test:node": "npm run build:ts && node --test scripts/verify-url.mjs",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
     "dist:mac": "npm run build && electron-builder --mac",
