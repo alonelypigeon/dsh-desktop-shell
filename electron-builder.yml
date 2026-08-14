@@ -1,0 +1,81 @@
+appId: io.github.dsh.desktop-shell
+productName: DeepSeek Harness Shell
+copyright: Copyright © 2026 dsh-desktop-shell contributors
+
+directories:
+  output: release
+  buildResources: build
+
+# 自动更新源（generic provider）。发布时请把 URL 改成你自己的更新服务器；
+# 运行时也可用 DSH_UPDATE_URL 环境变量覆盖。
+# 如果你有 GitHub 仓库，可改用 github provider：
+#   publish:
+#     provider: github
+#     owner: <your-account>
+#     repo: <your-repo>
+publish:
+  provider: generic
+  url: https://example.com/dsh-desktop-shell/updates/
+
+files:
+  - dist/**/*
+  - package.json
+
+asar: true
+compression: maximum
+
+# 无原生依赖，跳过 electron-rebuild（它会在打包时 fork 子进程）。
+npmRebuild: false
+
+# 直接复用已下载的 electron 运行时，避免打包时再次下载/写全局缓存。
+electronDist: node_modules/electron/dist
+
+# 二进制加固（@electron/fuses，electron-builder 内置支持）：
+# 关闭以 Electron 二进制冒充 node / 注入 node 选项 / 远程调试参数的能力，
+# 启用 asar 完整性校验与「只从 asar 加载应用」，防止常见的 Electron 滥用。
+electronFuses:
+  runAsNode: false
+  enableNodeCliInspectArguments: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableCookieEncryption: true
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+
+win:
+  target:
+    - nsis
+    - portable
+  icon: build/icon.png
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  shortcutName: DeepSeek Harness Shell
+  # 稳定的产物名：自动更新的 latest.yml/blockmap 依赖文件名可预测。
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+portable:
+  artifactName: ${productName}-Portable-${version}.${ext}
+
+mac:
+  target:
+    - dmg
+    - zip
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  # dsh-shell:// 深链协议（Windows 由应用运行时注册，Linux 需桌面入口声明）。
+  protocols:
+    - name: DeepSeek Harness Shell URL
+      schemes:
+        - dsh-shell
+
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: build/icon.png
+  category: Utility
+  # deb 元数据要求 maintainer（发布前改成你自己的名字/邮箱）。
+  maintainer: dsh-desktop-shell contributors <dsh-desktop-shell@users.noreply.github.com>

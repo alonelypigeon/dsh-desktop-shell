@@ -1,0 +1,56 @@
+# 发布 CI 模板：打 tag 时构建三平台产物并上传到 GitHub Release。
+# 用法（推送到 GitHub 后）：
+#   1. 把下方 owner/repo 填进 electron-builder.yml 的 publish.github（或用本文件的 env）。
+#   2. 配置 secrets：GH_TOKEN（或 GITHUB_TOKEN 自动可用，但发布到 Release 需
+#      `permissions: contents: write`，私有仓库还需带 token 的 PAT）。
+#   3. macOS 签名/公证：设置 APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
+#      APPLE_TEAM_ID，并开启 CSC_LINK/CSC_KEY_PASSWORD（或暂不签名发布）。
+#   4. git tag v0.1.0 && git push origin v0.1.0
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build & package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS 签名/公证（可选，未配置则输出未签名产物）：
+          # CSC_LINK: ${{ secrets.CSC_LINK }}
+          # CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx electron-builder --publish always
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: release/*.{exe,yml,blockmap,dmg,zip,AppImage,deb}
+          if-no-files-found: ignore

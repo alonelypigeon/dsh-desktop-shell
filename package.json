@@ -1,0 +1,36 @@
+{
+  "name": "dsh-desktop-shell",
+  "version": "0.1.0",
+  "description": "Clean tray-resident desktop shell for the DeepSeek Harness Web GUI — point it at your own dsh web, no bundled runtime",
+  "main": "dist/main.js",
+  "author": "dsh-desktop-shell contributors",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build:ts": "tsc",
+    "copy:static": "node scripts/copy-static.mjs",
+    "build": "npm run clean && npm run build:ts && npm run copy:static",
+    "dev": "npm run build && electron .",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:unit && npm run test:node",
+    "test:unit": "vitest run",
+    "test:watch": "vitest",
+    "test:node": "npm run build:ts && node --test --test-isolation=none scripts/verify-url.mjs",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:linux": "npm run build && electron-builder --linux"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.0"
+  }
+}
