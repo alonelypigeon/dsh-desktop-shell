@@ -20,24 +20,32 @@ export function looksLikeDshFavicon(svg: string): boolean {
   return svg.includes('M48.8354');
 }
 
-async function probe(url: string): Promise<boolean> {
+// 单次 fetch 的独立超时（此前用同一个 AbortController 罩两次请求：
+// index 请求吃满 3s 后 favicon 探测只剩零头，会误判为超时）。
+async function fetchWithTimeout(url: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: controller.signal, redirect: 'manual' });
+    return await fetch(url, { signal: controller.signal, redirect: 'manual' });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function probe(url: string): Promise<boolean> {
+  try {
+    const res = await fetchWithTimeout(url);
     if (res.status >= 500) return false;
     const html = await res.text();
     if (!looksLikeDshIndex(html)) return false;
     // 二次确认：favicon 必须是官方鲸鱼，避免把无关 Web 服务误判为 DSH。
     const origin = new URL(url).origin;
-    const fav = await fetch(`${origin}/favicon.svg`, { signal: controller.signal });
+    const fav = await fetchWithTimeout(`${origin}/favicon.svg`);
     if (fav.status !== 200) return false;
     const svg = await fav.text();
     return looksLikeDshFavicon(svg);
   } catch {
     return false;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

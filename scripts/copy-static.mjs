@@ -9,7 +9,8 @@ const root = join(__dirname, '..');
 
 const assets = [
   ['src/shell.html', 'dist/shell.html'],
-  ['src/conn-menu.html', 'dist/conn-menu.html'],
+  ['src/shell.css', 'dist/shell.css'],
+  ['src/shell.js', 'dist/shell.js'],
   ['build/icon.png', 'dist/icon.png'],
   ['build/whale.svg', 'dist/whale.svg'],
   ['build/whale-white.svg', 'dist/whale-white.svg'],

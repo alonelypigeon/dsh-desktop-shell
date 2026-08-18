@@ -1,11 +1,7 @@
-import { loadSharedConfig, saveSharedConfig } from './shared-config';
+import { loadSharedConfig } from './shared-config';
 import { parseCliUrl, pickUrl, validateUrl } from './url';
 
 export { validateUrl } from './url';
-
-export function saveUrl(url: string): void {
-  saveSharedConfig({ url });
-}
 
 // 配置来源优先级：--url > DSH_URL > 共享配置 url。
 // 没有配置时返回 null（由 main 显示 login 界面）。

@@ -2,6 +2,12 @@ import { shell, type WebContents } from 'electron';
 
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:']);
 
+// 已安装的 will-navigate 守卫（按 webContents 记录）。
+// attachSecurity 会在切换服务器时对同一个内容视图重复调用：必须先摘掉
+// 旧监听器再挂新的，否则旧 origin 的守卫会把新服务器的站内导航全部
+// 误判为「偏离源」拦截并甩给系统浏览器。
+const installedGuards = new WeakMap<WebContents, (e: Electron.Event, url: string) => void>();
+
 // DSH 页面用不到的敏感权限一律拒绝；剪贴板/通知/全屏等常规能力放行，
 // 避免远程页面借此调用本机摄像头、麦克风、定位或外设。
 const DENIED_PERMISSIONS = new Set([
@@ -47,7 +53,10 @@ export function attachSecurity(contents: WebContents, dshOrigin: string): void {
   });
 
   // 页面内导航偏离 DSH 源 → 拦截并外开（仅放行 http/https）。
-  contents.on('will-navigate', (e, url) => {
+  // 幂等：先移除上一次安装的守卫（见 installedGuards 注释）。
+  const prevGuard = installedGuards.get(contents);
+  if (prevGuard) contents.removeListener('will-navigate', prevGuard);
+  const guard = (e: Electron.Event, url: string): void => {
     try {
       if (new URL(url).origin !== dshOrigin) {
         e.preventDefault();
@@ -57,7 +66,9 @@ export function attachSecurity(contents: WebContents, dshOrigin: string): void {
       e.preventDefault();
       console.warn(`[security] blocked unparseable navigation: ${url}`);
     }
-  });
+  };
+  installedGuards.set(contents, guard);
+  contents.on('will-navigate', guard);
 
   // 权限策略：拒绝敏感设备权限（见 DENIED_PERMISSIONS）。
   const { session } = contents;

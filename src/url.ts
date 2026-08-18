@@ -38,3 +38,12 @@ export function pickUrl(
 ): string | null {
   return cliUrl ?? envUrl ?? fileUrl;
 }
+
+// 判断主机名是否为回环地址（用于豁免「连接远程服务器」确认弹窗）。
+// 注意：WHATWG URL 的 hostname 对 IPv6 保留方括号（如 '[::1]'），
+// 必须剥掉后再比较；127.0.0.0/8 整段都是回环。
+export function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase().replace(/^\[(.*)\]$/, '$1');
+  if (host === 'localhost' || host === '::1' || host === '::ffff:127.0.0.1') return true;
+  return /^127\./.test(host);
+}

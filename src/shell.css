@@ -1,0 +1,602 @@
+/* shell.html 的样式（从内联 <style> 外置，配合 CSP 收紧 style-src 'self'）。 */
+
+/* 与 DeepSeek Harness 设计平台一致的 token（取自 dsh-client-ui-theme/design-platform.css） */
+:root {
+  --ds-bg: #151517;               /* neutral-bluish-950（深色默认） */
+  --ds-border: rgba(255, 255, 255, 0.06);
+  --ds-text: rgb(235, 238, 242);  /* neutral-bluish-100 */
+  --ds-text-dim: rgb(151, 157, 166); /* neutral-bluish-500 */
+  --ds-brand: #4176e6;            /* deepseek-500 */
+  --ds-hover: rgba(255, 255, 255, 0.08);
+  --ds-close-hover: #ef1f1f;      /* red-600 */
+  --ds-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --ds-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+body[data-theme="light"] {
+  --ds-bg: rgb(255, 255, 255);    /* neutral-bluish-00 */
+  --ds-border: rgba(0, 0, 0, 0.06);
+  --ds-text: rgb(15, 17, 21);     /* neutral-bluish-1000 */
+  --ds-text-dim: rgb(97, 102, 107); /* neutral-bluish-700 */
+  --ds-hover: rgba(0, 0, 0, 0.05);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--ds-font);
+  color: var(--ds-text);
+  background: var(--ds-bg);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* —— 标题栏 —— */
+.titlebar {
+  display: flex;
+  align-items: center;
+  height: 42px;
+  flex: none;
+  background: var(--ds-bg);
+  border-bottom: 1px solid var(--ds-border);
+  -webkit-app-region: drag;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 14px;
+  flex: 1;
+  min-width: 0;
+}
+.logo { width: 20px; height: 20px; display: block; -webkit-user-drag: none; }
+.title {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  color: var(--ds-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* —— 已连接状态 + 断开菜单（标题栏中部） —— */
+.conn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  padding: 0 12px;
+  -webkit-app-region: no-drag;
+}
+.conn[hidden] { display: none; }
+.conn-url {
+  max-width: 340px;
+  font-size: 12px;
+  color: var(--ds-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conn-url::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #34d399;
+  margin-right: 7px;
+  vertical-align: 1px;
+}
+.conn-dd { position: relative; }
+.conn-btn, .tb-btn {
+  font-size: 12px;
+  color: var(--ds-text-dim);
+  background: transparent;
+  border: 1px solid var(--ds-border);
+  border-radius: 7px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background var(--ds-ease) 0.15s, color var(--ds-ease) 0.15s, border-color var(--ds-ease) 0.15s;
+  outline: none;
+  white-space: nowrap;
+}
+.conn-btn:hover, .tb-btn:hover { background: var(--ds-hover); color: var(--ds-text); border-color: var(--ds-brand); }
+
+/* —— 标题栏动作区：置顶开关 / 服务器菜单 / 更多菜单 —— */
+.tb-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  flex: none;
+  -webkit-app-region: no-drag;
+}
+.tb-btn.icon {
+  width: 28px;
+  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tb-btn.icon svg { width: 14px; height: 14px; display: block; }
+/* 置顶激活态：品牌色高亮 */
+.tb-btn.active {
+  color: var(--ds-brand);
+  border-color: var(--ds-brand);
+  background: rgba(65, 118, 230, 0.1);
+}
+.controls {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+.controls button {
+  width: 46px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--ds-text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background var(--ds-ease) 0.15s, color var(--ds-ease) 0.15s;
+  outline: none;
+}
+.controls button:hover { background: var(--ds-hover); color: var(--ds-text); }
+.controls button.close:hover { background: var(--ds-close-hover); color: #fff; }
+.controls button svg { width: 14px; height: 14px; display: block; }
+/* 还原图标默认隐藏（原为内联 style 属性，CSP style-src 'self' 会拦截内联样式，
+   改由 class 控制；JS 通过 CSSOM 修改 style.display 不受 CSP 限制） */
+.controls .ico-restore { display: none; }
+
+/* —— 页面内查找栏（内容视图快捷键唤出；主进程把内容视图下移让位） —— */
+.findbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  background: var(--ds-bg);
+  border-bottom: 1px solid var(--ds-border);
+}
+.findbar[hidden] { display: none; }
+.find-ico { width: 14px; height: 14px; color: var(--ds-text-dim); flex: none; }
+#find-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 420px;
+  font-size: 12.5px;
+  padding: 6px 10px;
+  border: 1px solid var(--ds-border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ds-text);
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+#find-input:focus { border-color: var(--ds-brand); }
+.find-count {
+  flex: none;
+  min-width: 52px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ds-text-dim);
+}
+.find-btn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--ds-border);
+  background: transparent;
+  color: var(--ds-text-dim);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  outline: none;
+  transition: background var(--ds-ease) 0.15s, color var(--ds-ease) 0.15s, border-color var(--ds-ease) 0.15s;
+}
+.find-btn:hover { background: var(--ds-hover); color: var(--ds-text); border-color: var(--ds-brand); }
+
+/* —— 快捷键设置面板（「更多 → 快捷键设置…」；模态覆盖层） —— */
+.settings {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+.settings[hidden] { display: none; }
+.settings-card {
+  width: min(600px, calc(100vw - 48px));
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  background: var(--ds-bg);
+  border: 1px solid var(--ds-border);
+  border-radius: 14px;
+  padding: 22px 24px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.settings-title { font-size: 16px; font-weight: 600; margin: 0; color: var(--ds-text); }
+.settings-sub { font-size: 12px; color: var(--ds-text-dim); margin: 8px 0 12px; line-height: 18px; }
+.settings-groups { overflow-y: auto; min-height: 0; }
+.settings-group-title {
+  font-size: 11.5px;
+  color: var(--ds-text-dim);
+  letter-spacing: 0.4px;
+  margin: 12px 0 4px;
+}
+.settings-groups .settings-group-title:first-child { margin-top: 0; }
+.sc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ds-border);
+}
+.settings-groups .sc-row:last-child { border-bottom: none; }
+.sc-info { min-width: 0; }
+.sc-name { font-size: 13px; color: var(--ds-text); }
+.sc-desc { font-size: 11.5px; color: var(--ds-text-dim); margin-top: 2px; }
+.sc-op { display: flex; align-items: center; gap: 8px; flex: none; }
+.sc-bind {
+  min-width: 170px;
+  text-align: center;
+  font-size: 12px;
+  font-family: var(--ds-font);
+  color: var(--ds-text);
+  background: transparent;
+  border: 1px solid var(--ds-border);
+  border-radius: 7px;
+  padding: 5px 10px;
+  cursor: pointer;
+  outline: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--ds-ease) 0.15s, color var(--ds-ease) 0.15s, border-color var(--ds-ease) 0.15s;
+}
+.sc-bind:hover { border-color: var(--ds-brand); background: var(--ds-hover); }
+.sc-bind.recording { color: var(--ds-brand); border-color: var(--ds-brand); background: rgba(65, 118, 230, 0.1); }
+.sc-error {
+  flex: none;
+  max-width: 150px;
+  font-size: 11px;
+  line-height: 14px;
+  color: #ef4444;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sc-reset {
+  flex: none;
+  min-width: 30px;
+  height: 28px;
+  margin-top: 0;
+  align-self: center;
+  padding: 0 8px;
+  font-size: 15px;
+}
+.settings-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+}
+.settings-hint { font-size: 11.5px; color: var(--ds-text-dim); }
+
+/* —— login 界面 ——
+   左侧深色品牌区（两种主题下均保持深色，作为品牌锚点），右侧表单区完全
+   走 --ds-* token 跟随深浅色；圆角/悬停/聚焦环与标题栏、设置面板同一套语言。 */
+.login {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.login-left {
+  flex: 0 0 42%;
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 48px 40px;
+  background:
+    radial-gradient(1200px 600px at 20% -10%, rgba(65, 118, 230, 0.35), transparent 60%),
+    radial-gradient(900px 500px at 110% 110%, rgba(86, 134, 254, 0.25), transparent 55%),
+    #151517;
+  color: rgb(235, 238, 242);
+}
+.login-logo { width: 120px; height: 120px; -webkit-user-drag: none; filter: drop-shadow(0 12px 40px rgba(65,118,230,0.45)); }
+.login-brand { font-size: 22px; font-weight: 600; letter-spacing: 0.4px; }
+.login-slogan { font-size: 13px; color: rgba(235, 238, 242, 0.55); }
+.login-feats {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.feat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: rgba(235, 238, 242, 0.78);
+}
+.feat svg { width: 15px; height: 15px; color: #5686fe; flex: none; }
+.login-foot {
+  margin-top: auto;
+  padding-top: 18px;
+  font-size: 11.5px;
+  letter-spacing: 0.3px;
+  color: rgba(235, 238, 242, 0.4);
+}
+
+/* 右侧：内容限宽居中（宽窗口下表单不被拉满） */
+.login-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow-y: auto;
+  padding: 36px 48px;
+}
+.login-body {
+  margin: auto;
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.login-h1 { font-size: 20px; font-weight: 600; margin: 0; color: var(--ds-text); }
+.login-sub { font-size: 13px; color: var(--ds-text-dim); margin: 0 0 4px; }
+
+/* 连接方式卡片：图标 + 标题/描述；原生 radio 视觉隐藏（保留可聚焦），
+   选中态由 shell.js 切 .selected，键盘焦点经 .card:focus-within 呈现 */
+.cards { display: flex; flex-direction: column; gap: 10px; }
+.card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--ds-border);
+  border-radius: 12px;
+  cursor: pointer;
+  background: transparent;
+  transition: border-color 0.15s var(--ds-ease), background 0.15s var(--ds-ease), box-shadow 0.15s var(--ds-ease);
+}
+.card:hover { background: var(--ds-hover); }
+.card.selected { border-color: var(--ds-brand); background: rgba(65, 118, 230, 0.08); }
+.card:focus-within { border-color: var(--ds-brand); box-shadow: 0 0 0 3px rgba(65, 118, 230, 0.14); }
+.card input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+.card-ico {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ds-brand);
+  background: rgba(65, 118, 230, 0.1);
+  border: 1px solid rgba(65, 118, 230, 0.16);
+  transition: background 0.15s var(--ds-ease);
+}
+.card.selected .card-ico { background: rgba(65, 118, 230, 0.16); }
+.card-ico svg { width: 16px; height: 16px; display: block; }
+.card-text { min-width: 0; }
+.card-title { font-size: 14px; font-weight: 500; color: var(--ds-text); }
+.card-desc { font-size: 12px; color: var(--ds-text-dim); margin-top: 2px; line-height: 18px; }
+
+/* 输入框：统一聚焦环（品牌色描边 + 柔和光环） */
+.remote-row { display: flex; gap: 8px; }
+.remote-row[hidden] { display: none; }
+.remote-row input,
+.port-row input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  padding: 9px 12px;
+  border: 1px solid var(--ds-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ds-text);
+  outline: none;
+  transition: border-color 0.15s var(--ds-ease), box-shadow 0.15s var(--ds-ease);
+}
+.remote-row input { width: 100%; }
+.remote-row input:focus,
+.port-row input:focus {
+  border-color: var(--ds-brand);
+  box-shadow: 0 0 0 3px rgba(65, 118, 230, 0.14);
+}
+.remote-row input::placeholder,
+.port-row input::placeholder { color: var(--ds-text-dim); opacity: 0.7; }
+
+.port-row { display: flex; gap: 8px; align-items: center; }
+.port-row[hidden] { display: none; }
+.port-row label {
+  font-size: 12.5px;
+  color: var(--ds-text-dim);
+  flex: none;
+}
+.port-row input { flex: 0 1 130px; }
+.port-hint { font-size: 11.5px; color: var(--ds-text-dim); }
+
+.recent { display: flex; flex-direction: column; gap: 6px; }
+.recent[hidden] { display: none; }
+.recent-title {
+  font-size: 12px;
+  color: var(--ds-text-dim);
+  margin: 4px 0 0;
+  letter-spacing: 0.3px;
+}
+
+/* 连接按钮：全宽主按钮；busy 态左侧转圈 */
+.connect {
+  width: 100%;
+  height: 40px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #fff;
+  background: var(--ds-brand);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s var(--ds-ease), opacity 0.15s var(--ds-ease);
+}
+.connect:hover { background: #5686fe; }
+.connect:disabled { opacity: 0.55; cursor: default; }
+.connect.busy::before {
+  content: '';
+  width: 13px;
+  height: 13px;
+  margin-right: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.status {
+  min-height: 22px;
+  font-size: 12.5px;
+  line-height: 20px;
+  color: var(--ds-text-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.status.error { color: #ef4444; }
+.status .inst {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--ds-border);
+  background: transparent;
+  color: var(--ds-text);
+  border-radius: 8px;
+  padding: 9px 12px 9px 32px;
+  margin-top: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-family: var(--ds-font);
+  transition: border-color 0.15s var(--ds-ease), background 0.15s var(--ds-ease);
+}
+.status .inst:hover { border-color: var(--ds-brand); background: var(--ds-hover); }
+.status .inst b { color: var(--ds-brand); font-weight: 600; }
+/* 实例/最近连接条目的运行状态点（与标题栏 conn-url 同款） */
+.status .inst::before,
+.recent-row .inst::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #34d399;
+}
+
+/* —— 最近连接：头部（标题 + 清除全部）+ 行（链接 + 删除）——
+   按钮样式与 DSH 设计平台一致：ghost 按钮（透明底 + 悬停底色）、
+   图标按钮（描边 + 悬停高亮），主操作色沿用 --ds-brand。 */
+.recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 0 2px;
+}
+.recent-head .recent-title { margin: 0; }
+.ghost-btn {
+  font-size: 12px;
+  color: var(--ds-text-dim);
+  background: transparent;
+  border: 1px solid var(--ds-border);
+  border-radius: 8px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background var(--ds-ease) 0.15s, color var(--ds-ease) 0.15s, border-color var(--ds-ease) 0.15s;
+  outline: none;
+  white-space: nowrap;
+}
+.ghost-btn:hover { background: var(--ds-hover); color: var(--ds-text); border-color: var(--ds-brand); }
+.recent-row { display: flex; gap: 6px; align-items: stretch; }
+.recent-row .inst {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  border: 1px solid var(--ds-border);
+  background: transparent;
+  color: var(--ds-text);
+  border-radius: 8px;
+  padding: 8px 12px 8px 32px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-family: var(--ds-font);
+  transition: border-color 0.15s var(--ds-ease), background 0.15s var(--ds-ease);
+}
+.recent-row .inst:hover { border-color: var(--ds-brand); background: var(--ds-hover); }
+.icon-btn {
+  flex: none;
+  align-self: stretch;
+  margin-top: 6px;
+  min-width: 30px;
+  border: 1px solid var(--ds-border);
+  background: transparent;
+  color: var(--ds-text-dim);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 8px;
+  transition: background var(--ds-ease) 0.15s, color var(--ds-ease) 0.15s, border-color var(--ds-ease) 0.15s;
+  outline: none;
+}
+.icon-btn:hover { background: var(--ds-hover); color: var(--ds-text); border-color: var(--ds-brand); }
+.icon-btn.danger:hover { background: rgba(239, 68, 68, 0.12); color: #ef4444; border-color: rgba(239, 68, 68, 0.4); }

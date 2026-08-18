@@ -2,329 +2,13 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
+  <!-- 样式与脚本均已外置（shell.css / shell.js），CSP 不再需要 'unsafe-inline' -->
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'"
+    content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'"
   />
+  <link rel="stylesheet" href="shell.css" />
   <title>DeepSeek Harness</title>
-  <style>
-    /* 与 DeepSeek Harness 设计平台一致的 token（取自 dsh-client-ui-theme/design-platform.css） */
-    :root {
-      --ds-bg: #151517;               /* neutral-bluish-950（深色默认） */
-      --ds-border: rgba(255, 255, 255, 0.06);
-      --ds-text: rgb(235, 238, 242);  /* neutral-bluish-100 */
-      --ds-text-dim: rgb(151, 157, 166); /* neutral-bluish-500 */
-      --ds-brand: #4176e6;            /* deepseek-500 */
-      --ds-hover: rgba(255, 255, 255, 0.08);
-      --ds-close-hover: #ef1f1f;      /* red-600 */
-      --ds-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-        'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-      --ds-ease: cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    body[data-theme="light"] {
-      --ds-bg: rgb(255, 255, 255);    /* neutral-bluish-00 */
-      --ds-border: rgba(0, 0, 0, 0.06);
-      --ds-text: rgb(15, 17, 21);     /* neutral-bluish-1000 */
-      --ds-text-dim: rgb(97, 102, 107); /* neutral-bluish-700 */
-      --ds-hover: rgba(0, 0, 0, 0.05);
-    }
-
-    * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; }
-    body {
-      font-family: var(--ds-font);
-      color: var(--ds-text);
-      background: var(--ds-bg);
-      -webkit-font-smoothing: antialiased;
-      user-select: none;
-      -webkit-user-select: none;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-    }
-
-    /* —— 标题栏 —— */
-    .titlebar {
-      display: flex;
-      align-items: center;
-      height: 42px;
-      flex: none;
-      background: var(--ds-bg);
-      border-bottom: 1px solid var(--ds-border);
-      -webkit-app-region: drag;
-    }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding-left: 14px;
-      flex: 1;
-      min-width: 0;
-    }
-    .logo { width: 20px; height: 20px; display: block; -webkit-user-drag: none; }
-    .title {
-      font-size: 13px;
-      font-weight: 500;
-      letter-spacing: 0.2px;
-      color: var(--ds-text-dim);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    /* —— 已连接状态 + 断开菜单（标题栏中部） —— */
-    .conn {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex: none;
-      padding: 0 12px;
-      -webkit-app-region: no-drag;
-    }
-    .conn[hidden] { display: none; }
-    .conn-url {
-      max-width: 340px;
-      font-size: 12px;
-      color: var(--ds-text-dim);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .conn-url::before {
-      content: '';
-      display: inline-block;
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: #34d399;
-      margin-right: 7px;
-      vertical-align: 1px;
-    }
-    .conn-dd { position: relative; }
-    .conn-btn {
-      font-size: 12px;
-      color: var(--ds-text-dim);
-      background: transparent;
-      border: 1px solid var(--ds-border);
-      border-radius: 7px;
-      padding: 4px 10px;
-      cursor: pointer;
-      transition: background var(--ds-ease) 0.15s, color var(--ds-ease) 0.15s, border-color var(--ds-ease) 0.15s;
-      outline: none;
-      white-space: nowrap;
-    }
-    .conn-btn:hover { background: var(--ds-hover); color: var(--ds-text); border-color: var(--ds-brand); }
-    .conn-btn.open { background: var(--ds-hover); color: var(--ds-text); border-color: var(--ds-brand); }
-    .controls {
-      display: flex;
-      align-items: stretch;
-      height: 100%;
-      -webkit-app-region: no-drag;
-    }
-    .controls button {
-      width: 46px;
-      height: 100%;
-      border: none;
-      background: transparent;
-      color: var(--ds-text-dim);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0;
-      transition: background var(--ds-ease) 0.15s, color var(--ds-ease) 0.15s;
-      outline: none;
-    }
-    .controls button:hover { background: var(--ds-hover); color: var(--ds-text); }
-    .controls button.close:hover { background: var(--ds-close-hover); color: #fff; }
-    .controls button svg { width: 14px; height: 14px; display: block; }
-
-    /* —— login 界面 —— */
-    .login {
-      flex: 1;
-      min-height: 0;
-      display: flex;
-    }
-    .login-left {
-      flex: 0 0 42%;
-      min-width: 320px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 18px;
-      padding: 40px;
-      background:
-        radial-gradient(1200px 600px at 20% -10%, rgba(65, 118, 230, 0.35), transparent 60%),
-        radial-gradient(900px 500px at 110% 110%, rgba(86, 134, 254, 0.25), transparent 55%),
-        #151517;
-      color: rgb(235, 238, 242);
-    }
-    .login-logo { width: 132px; height: 132px; -webkit-user-drag: none; filter: drop-shadow(0 12px 40px rgba(65,118,230,0.45)); }
-    .login-brand { font-size: 22px; font-weight: 600; letter-spacing: 0.4px; }
-    .login-slogan { font-size: 13px; color: rgba(235, 238, 242, 0.55); }
-
-    .login-right {
-      flex: 1;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 14px;
-      padding: 40px 56px;
-      overflow-y: auto;
-    }
-    .login-h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; color: var(--ds-text); }
-    .login-sub { font-size: 13px; color: var(--ds-text-dim); margin: 0 0 8px; }
-
-    .cards { display: flex; flex-direction: column; gap: 10px; }
-    .card {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      padding: 14px 16px;
-      border: 1px solid var(--ds-border);
-      border-radius: 12px;
-      cursor: pointer;
-      transition: border-color 0.15s var(--ds-ease), background 0.15s var(--ds-ease);
-      background: transparent;
-    }
-    .card:hover { background: var(--ds-hover); }
-    .card.selected { border-color: var(--ds-brand); background: rgba(65, 118, 230, 0.08); }
-    .card input { margin-top: 4px; accent-color: var(--ds-brand); flex: none; }
-    .card-title { font-size: 14px; font-weight: 500; color: var(--ds-text); }
-    .card-desc { font-size: 12px; color: var(--ds-text-dim); margin-top: 2px; line-height: 18px; }
-
-    .remote-row { display: flex; gap: 8px; }
-    .remote-row[hidden] { display: none; }
-    .remote-row input {
-      flex: 1;
-      font-size: 13px;
-      padding: 9px 12px;
-      border: 1px solid var(--ds-border);
-      border-radius: 8px;
-      background: transparent;
-      color: var(--ds-text);
-      outline: none;
-    }
-    .remote-row input:focus { border-color: var(--ds-brand); }
-
-    .port-row { display: flex; gap: 8px; align-items: center; }
-    .port-row[hidden] { display: none; }
-    .port-row label {
-      font-size: 12.5px;
-      color: var(--ds-text-dim);
-      flex: none;
-    }
-    .port-row input {
-      width: 130px;
-      font-size: 13px;
-      padding: 8px 10px;
-      border: 1px solid var(--ds-border);
-      border-radius: 8px;
-      background: transparent;
-      color: var(--ds-text);
-      outline: none;
-    }
-    .port-row input:focus { border-color: var(--ds-brand); }
-    .port-hint { font-size: 11.5px; color: var(--ds-text-dim); }
-
-    .recent { display: flex; flex-direction: column; gap: 6px; }
-    .recent[hidden] { display: none; }
-    .recent-title {
-      font-size: 12px;
-      color: var(--ds-text-dim);
-      margin: 4px 0 0;
-      letter-spacing: 0.3px;
-    }
-
-    .connect {
-      align-self: flex-start;
-      font-size: 14px;
-      font-weight: 500;
-      color: #fff;
-      background: var(--ds-brand);
-      border: none;
-      border-radius: 8px;
-      padding: 10px 28px;
-      cursor: pointer;
-      transition: background 0.15s var(--ds-ease);
-    }
-    .connect:hover { background: #5686fe; }
-    .connect:disabled { opacity: 0.55; cursor: default; }
-
-    .status {
-      min-height: 22px;
-      font-size: 12.5px;
-      line-height: 20px;
-      color: var(--ds-text-dim);
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-    .status.error { color: #ef4444; }
-    .status .inst {
-      display: block;
-      width: 100%;
-      text-align: left;
-      border: 1px solid var(--ds-border);
-      background: transparent;
-      color: var(--ds-text);
-      border-radius: 8px;
-      padding: 8px 12px;
-      margin-top: 6px;
-      cursor: pointer;
-      font-size: 12.5px;
-      font-family: var(--ds-font);
-    }
-    .status .inst:hover { border-color: var(--ds-brand); background: var(--ds-hover); }
-    .status .inst b { color: var(--ds-brand); font-weight: 600; }
-
-    /* —— 最近连接：头部（标题 + 清除全部）+ 行（链接 + 删除）——
-       按钮样式与 DSH 设计平台一致：ghost 按钮（透明底 + 悬停底色）、
-       图标按钮（描边 + 悬停高亮），主操作色沿用 --ds-brand。 */
-    .recent-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      margin: 4px 0 2px;
-    }
-    .recent-head .recent-title { margin: 0; }
-    .ghost-btn {
-      font-size: 12px;
-      color: var(--ds-text-dim);
-      background: transparent;
-      border: 1px solid var(--ds-border);
-      border-radius: 7px;
-      padding: 3px 10px;
-      cursor: pointer;
-      transition: background var(--ds-ease) 0.15s, color var(--ds-ease) 0.15s, border-color var(--ds-ease) 0.15s;
-      outline: none;
-      white-space: nowrap;
-    }
-    .ghost-btn:hover { background: var(--ds-hover); color: var(--ds-text); border-color: var(--ds-brand); }
-    .recent-row { display: flex; gap: 6px; align-items: stretch; }
-    .recent-row .inst { flex: 1; min-width: 0; margin-top: 6px; }
-    .icon-btn {
-      flex: none;
-      align-self: stretch;
-      margin-top: 6px;
-      min-width: 30px;
-      border: 1px solid var(--ds-border);
-      background: transparent;
-      color: var(--ds-text-dim);
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 15px;
-      line-height: 1;
-      padding: 0 8px;
-      transition: background var(--ds-ease) 0.15s, color var(--ds-ease) 0.15s, border-color var(--ds-ease) 0.15s;
-      outline: none;
-    }
-    .icon-btn:hover { background: var(--ds-hover); color: var(--ds-text); border-color: var(--ds-brand); }
-    .icon-btn.danger:hover { background: rgba(239, 68, 68, 0.12); color: #ef4444; border-color: rgba(239, 68, 68, 0.4); }
-  </style>
 </head>
 <body>
   <div class="titlebar">
@@ -334,7 +18,23 @@
     </div>
     <div class="conn" id="conn" hidden>
       <span class="conn-url" id="conn-url"></span>
-      <button class="conn-btn" id="conn-toggle" title="断开连接">断开连接 ▾</button>
+      <button class="tb-btn" id="conn-toggle" title="断开连接">断开连接 ▾</button>
+    </div>
+    <div class="tb-actions">
+      <button class="tb-btn icon" id="pin" title="窗口置顶" aria-label="窗口置顶">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 17v5" />
+          <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
+        </svg>
+      </button>
+      <button class="tb-btn" id="server-menu" title="管理服务器">服务器 ▾</button>
+      <button class="tb-btn icon" id="more-menu" title="更多" aria-label="更多">
+        <svg viewBox="0 0 14 14" fill="currentColor" stroke="none">
+          <circle cx="3" cy="7" r="1.3" />
+          <circle cx="7" cy="7" r="1.3" />
+          <circle cx="11" cy="7" r="1.3" />
+        </svg>
+      </button>
     </div>
     <div class="controls">
       <button id="min" title="最小化" aria-label="最小化">
@@ -346,9 +46,9 @@
         <svg class="ico-max" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2">
           <rect x="3" y="3" width="8" height="8" rx="1" />
         </svg>
-        <svg class="ico-restore" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" style="display:none">
-          <path d="M4 4h6v6" />
+        <svg class="ico-restore" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2">
           <rect x="2.5" y="2.5" width="6" height="6" rx="1" />
+          <rect x="5.5" y="5.5" width="6" height="6" rx="1" />
         </svg>
       </button>
       <button id="close" class="close" title="关闭" aria-label="关闭">
@@ -360,265 +60,126 @@
     </div>
   </div>
 
+  <!-- 页面内查找栏（内容视图快捷键唤出；打开时内容视图下移让出这一条） -->
+  <div class="findbar" id="findbar" hidden>
+    <svg class="find-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <circle cx="11" cy="11" r="7" />
+      <line x1="16.5" y1="16.5" x2="21" y2="21" />
+    </svg>
+    <input id="find-input" type="text" spellcheck="false" placeholder="在页面中查找…" />
+    <span class="find-count" id="find-count"></span>
+    <button class="find-btn" id="find-prev" type="button" title="上一个匹配（Shift+Enter）" aria-label="上一个匹配">↑</button>
+    <button class="find-btn" id="find-next" type="button" title="下一个匹配（Enter）" aria-label="下一个匹配">↓</button>
+    <button class="find-btn" id="find-close" type="button" title="关闭查找栏（Esc）" aria-label="关闭查找栏">✕</button>
+  </div>
+
+  <!-- 快捷键设置面板（「更多 → 快捷键设置…」打开；期间 DSH 内容视图临时让位） -->
+  <div class="settings" id="settings" hidden>
+    <div class="settings-card">
+      <div class="settings-head">
+        <h2 class="settings-title">快捷键设置</h2>
+        <button class="ghost-btn" id="settings-close" type="button">完成</button>
+      </div>
+      <p class="settings-sub">
+        点击按键组合重新绑定；录制时 <b>Esc</b> 取消、<b>Backspace</b> 清除绑定。
+        字母 / 数字 / 符号需配合 Ctrl 或 Alt，F 功能键可单独绑定。
+      </p>
+      <div class="settings-groups" id="settings-groups"></div>
+      <div class="settings-foot">
+        <span class="settings-hint" id="settings-env-hint" hidden
+          >全局热键正由 DSH_HOTKEY 环境变量指定；重新绑定或重置后将固定为自定义值</span
+        >
+        <button class="ghost-btn" id="settings-reset-all" type="button">恢复全部默认</button>
+      </div>
+    </div>
+  </div>
+
   <div class="login" id="login">
     <div class="login-left">
       <img class="login-logo" src="whale-white.svg" alt="DeepSeek" />
       <div class="login-brand">DeepSeek Harness</div>
       <div class="login-slogan">本地 · 智能 · 属于你的 Agent 工作台</div>
+      <div class="login-feats">
+        <div class="feat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <span>本地运行，数据不出本机</span>
+        </div>
+        <div class="feat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <span>沙箱隔离加载，DSH 页面零注入</span>
+        </div>
+        <div class="feat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <span>断线自动重连，托盘常驻后台</span>
+        </div>
+      </div>
+      <div class="login-foot">DeepSeek Harness Shell · 社区实验项目</div>
     </div>
     <div class="login-right">
-      <h1 class="login-h1">连接 DeepSeek Harness</h1>
-      <p class="login-sub">选择你要连接的服务器</p>
-      <div class="cards" id="cards">
-        <label class="card selected">
-          <input type="radio" name="method" value="sniff" checked />
-          <div>
-            <div class="card-title">本地嗅探</div>
-            <div class="card-desc">探测本机已运行的 DeepSeek Harness Web 服务</div>
-          </div>
-        </label>
-        <label class="card">
-          <input type="radio" name="method" value="local" />
-          <div>
-            <div class="card-title">GUI 启动本地服务器</div>
-            <div class="card-desc">由本应用启动并接管一个本地 DeepSeek Harness</div>
-          </div>
-        </label>
-        <label class="card">
-          <input type="radio" name="method" value="remote" />
-          <div>
-            <div class="card-title">云端服务器</div>
-            <div class="card-desc">连接远程的 DeepSeek Harness Web 服务</div>
-          </div>
-        </label>
+      <div class="login-body">
+        <h1 class="login-h1">连接 DeepSeek Harness</h1>
+        <p class="login-sub">选择你要连接的服务器</p>
+        <div class="cards" id="cards">
+          <label class="card selected">
+            <input type="radio" name="method" value="sniff" checked />
+            <span class="card-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="7" />
+                <line x1="16.5" y1="16.5" x2="21" y2="21" />
+              </svg>
+            </span>
+            <div class="card-text">
+              <div class="card-title">本地嗅探</div>
+              <div class="card-desc">探测本机已运行的 DeepSeek Harness Web 服务</div>
+            </div>
+          </label>
+          <label class="card">
+            <input type="radio" name="method" value="local" />
+            <span class="card-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="4 17 10 11 4 5" />
+                <line x1="12" y1="19" x2="20" y2="19" />
+              </svg>
+            </span>
+            <div class="card-text">
+              <div class="card-title">GUI 启动本地服务器</div>
+              <div class="card-desc">由本应用启动并接管一个本地 DeepSeek Harness</div>
+            </div>
+          </label>
+          <label class="card">
+            <input type="radio" name="method" value="remote" />
+            <span class="card-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
+              </svg>
+            </span>
+            <div class="card-text">
+              <div class="card-title">云端服务器</div>
+              <div class="card-desc">连接远程的 DeepSeek Harness Web 服务</div>
+            </div>
+          </label>
+        </div>
+        <div class="remote-row" id="remote-row" hidden>
+          <input id="remote-url" type="text" spellcheck="false" placeholder="https://your-dsh.example.com" />
+        </div>
+        <div class="port-row" id="port-row" hidden>
+          <label for="local-port">端口</label>
+          <input id="local-port" type="text" inputmode="numeric" spellcheck="false" placeholder="随机" />
+          <span class="port-hint">留空自动选择随机端口</span>
+        </div>
+        <div class="recent" id="recent" hidden></div>
+        <button id="connect" class="connect">重新嗅探</button>
+        <div class="status" id="status"></div>
       </div>
-      <div class="remote-row" id="remote-row" hidden>
-        <input id="remote-url" type="text" spellcheck="false" placeholder="https://your-dsh.example.com" />
-      </div>
-      <div class="port-row" id="port-row" hidden>
-        <label for="local-port">端口</label>
-        <input id="local-port" type="text" inputmode="numeric" spellcheck="false" placeholder="随机" />
-        <span class="port-hint">留空自动选择随机端口</span>
-      </div>
-      <div class="recent" id="recent" hidden></div>
-      <button id="connect" class="connect">连接</button>
-      <div class="status" id="status"></div>
     </div>
   </div>
 
-  <script>
-    (function () {
-      // —— 主题：初始从 query 读取，运行时由主进程推送 ——
-      function applyTheme(isDark) {
-        document.body.setAttribute('data-theme', isDark ? 'dark' : 'light');
-      }
-      var params = new URLSearchParams(location.search);
-      applyTheme(params.get('dark') === '1');
-      if (window.shellWindow && window.shellWindow.onThemeChange) {
-        window.shellWindow.onThemeChange(function (isDark) { applyTheme(isDark); });
-      }
-
-      // —— 窗口控制 ——
-      var max = document.getElementById('max');
-      var icoMax = max.querySelector('.ico-max');
-      var icoRestore = max.querySelector('.ico-restore');
-      document.getElementById('min').addEventListener('click', function () { window.shellWindow.minimize(); });
-      max.addEventListener('click', function () { window.shellWindow.toggleMaximize(); });
-      document.getElementById('close').addEventListener('click', function () { window.shellWindow.close(); });
-      window.shellWindow.onMaximizeChange(function (isMax) {
-        icoMax.style.display = isMax ? 'none' : 'block';
-        icoRestore.style.display = isMax ? 'block' : 'none';
-      });
-
-      // —— 已连接状态 + 断开连接菜单（独立小窗 conn-menu.html，避免被
-      //    DSH 内容视图遮挡）——
-      var connEl = document.getElementById('conn');
-      var connUrlEl = document.getElementById('conn-url');
-      var connToggle = document.getElementById('conn-toggle');
-      var menuOpen = false;
-      window.shellWindow.onConnectionChange(function (s) {
-        connEl.hidden = !s.connected;
-        connUrlEl.textContent = s.url || '';
-        menuOpen = false;
-        connToggle.classList.remove('open');
-        if (window.shellWindow.connMenu) window.shellWindow.connMenu.close();
-      });
-      // 菜单小窗关闭时同步按钮状态（失焦/点菜单项/父窗口移动都会触发）
-      if (window.shellWindow.connMenu) {
-        window.shellWindow.connMenu.onClosed(function () {
-          menuOpen = false;
-          connToggle.classList.remove('open');
-        });
-      }
-      connToggle.addEventListener('click', function () {
-        if (menuOpen) {
-          window.shellWindow.connMenu.close();
-          return;
-        }
-        var r = connToggle.getBoundingClientRect();
-        window.shellWindow.connMenu.open({ x: r.x, y: r.y, width: r.width, height: r.height });
-        menuOpen = true;
-        connToggle.classList.add('open');
-      });
-      // 点击主窗口其他任意处（除按钮自身）→ 收起菜单
-      document.addEventListener('mousedown', function (e) {
-        if (e.target === connToggle || connToggle.contains(e.target)) return;
-        if (menuOpen) window.shellWindow.connMenu.close();
-      });
-      // Esc 收起菜单（菜单小窗不抢焦点，Esc 落在主窗口）
-      document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && menuOpen) window.shellWindow.connMenu.close();
-      });
-
-      // —— login 交互 ——
-      var cards = document.getElementById('cards');
-      var remoteRow = document.getElementById('remote-row');
-      var remoteUrl = document.getElementById('remote-url');
-      var portRow = document.getElementById('port-row');
-      var localPort = document.getElementById('local-port');
-      var connectBtn = document.getElementById('connect');
-      var statusEl = document.getElementById('status');
-
-      function currentMethod() {
-        var r = cards.querySelector('input[name=method]:checked');
-        return r ? r.value : 'sniff';
-      }
-      function setStatus(text, isError) {
-        statusEl.className = 'status' + (isError ? ' error' : '');
-        statusEl.textContent = '';
-        if (text) statusEl.textContent = text;
-      }
-      function renderInstances(list) {
-        statusEl.className = 'status';
-        statusEl.textContent = '';
-        if (!list || list.length === 0) {
-          statusEl.textContent = '未发现正在运行的实例。可以试试「GUI 启动本地服务器」，或确认 dsh web 已启动。';
-          return;
-        }
-        var hint = document.createElement('div');
-        hint.textContent = '发现 ' + list.length + ' 个实例，点击连接：';
-        statusEl.appendChild(hint);
-        list.forEach(function (inst) {
-          var b = document.createElement('button');
-          b.className = 'inst';
-          b.textContent = '已检测到 DeepSeek Harness — ' + inst.url;
-          b.addEventListener('click', function () { window.shellWindow.login.joinRemote(inst.url); });
-          statusEl.appendChild(b);
-        });
-      }
-
-      function setBusy(busy) {
-        connectBtn.disabled = busy;
-        connectBtn.textContent = busy ? '连接中…' : '连接';
-      }
-
-      // —— 最近连接（点击重连；× 删除单条；清除全部）——
-      var recentEl = document.getElementById('recent');
-      function renderRecent(list) {
-        recentEl.textContent = '';
-        recentEl.hidden = !list || list.length === 0;
-        if (!list || list.length === 0) return;
-        var head = document.createElement('div');
-        head.className = 'recent-head';
-        var title = document.createElement('span');
-        title.className = 'recent-title';
-        title.textContent = '最近连接（点击重连）';
-        head.appendChild(title);
-        var clearBtn = document.createElement('button');
-        clearBtn.className = 'ghost-btn';
-        clearBtn.textContent = '清除全部';
-        clearBtn.title = '删除全部登录记录';
-        clearBtn.addEventListener('click', function () { window.shellWindow.login.clearRecent(); });
-        head.appendChild(clearBtn);
-        recentEl.appendChild(head);
-        list.forEach(function (url) {
-          var row = document.createElement('div');
-          row.className = 'recent-row';
-          var b = document.createElement('button');
-          b.className = 'inst';
-          b.textContent = url;
-          b.title = '点击连接 ' + url;
-          b.addEventListener('click', function () { window.shellWindow.login.joinRemote(url); });
-          row.appendChild(b);
-          var del = document.createElement('button');
-          del.className = 'icon-btn danger';
-          del.textContent = '×';
-          del.title = '删除该记录';
-          del.setAttribute('aria-label', '删除记录 ' + url);
-          del.addEventListener('click', function () { window.shellWindow.login.removeRecent(url); });
-          row.appendChild(del);
-          recentEl.appendChild(row);
-        });
-      }
-      window.shellWindow.login.onRecentResult(renderRecent);
-      window.shellWindow.login.requestRecent();
-
-      cards.addEventListener('change', function () {
-        var m = currentMethod();
-        cards.querySelectorAll('.card').forEach(function (l) {
-          l.classList.toggle('selected', l.querySelector('input').checked);
-        });
-        remoteRow.hidden = m !== 'remote';
-        portRow.hidden = m !== 'local';
-        setStatus('');
-        if (m === 'sniff') {
-          setStatus('正在嗅探本地实例…');
-          window.shellWindow.login.sniff();
-        }
-      });
-
-      connectBtn.addEventListener('click', function () {
-        var m = currentMethod();
-        if (m === 'sniff') {
-          setStatus('正在嗅探本地实例…');
-          window.shellWindow.login.sniff();
-        } else if (m === 'local') {
-          setBusy(true);
-          setStatus('正在启动本地 DeepSeek Harness…');
-          window.shellWindow.login.startLocal(localPort.value.trim());
-        } else if (m === 'remote') {
-          var url = remoteUrl.value.trim();
-          if (!url) {
-            setStatus('请输入云端服务器地址', true);
-            return;
-          }
-          setBusy(true);
-          setStatus('正在连接 ' + url + ' …');
-          window.shellWindow.login.joinRemote(url);
-        }
-      });
-
-      remoteUrl.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') connectBtn.click();
-      });
-      localPort.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') connectBtn.click();
-      });
-
-      // 主进程推送
-      window.shellWindow.login.onSniffResult(function (list) {
-        if (currentMethod() !== 'sniff') return;
-        renderInstances(list);
-      });
-      window.shellWindow.login.onProgress(function (msg) {
-        if (currentMethod() !== 'local') return;
-        setStatus(msg);
-      });
-      window.shellWindow.login.onResult(function (r) {
-        setBusy(false);
-        if (r && r.ok) {
-          setStatus('连接成功');
-        } else {
-          setStatus((r && r.error) || '连接失败', true);
-        }
-      });
-      window.shellWindow.login.onVisible(function (v) {
-        document.getElementById('login').style.display = v ? 'flex' : 'none';
-      });
-
-      // 默认选中嗅探：启动即开始一次
-      window.shellWindow.login.sniff();
-    })();
-  </script>
+  <script src="shell.js"></script>
 </body>
 </html>

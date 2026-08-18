@@ -5,13 +5,15 @@
 ## 特性
 
 - **Login 连接界面**：左侧官方鲸鱼 logo 品牌区，右侧三种连接方式——**本地嗅探**（探测本机已运行的 DSH Web，列出实例一键连接）/ **GUI 启动本地服务器**（spawn `dsh web` 并显示实时进度，自动在 npx 缓存里找 `dsh`；支持**指定端口**，留空自动选随机端口，端口被占用会把 dsh 的报错提示给你）/ **云端服务器**（输入远程 URL，非回环地址弹确认）。另有**最近连接**列表（记忆最近 5 个地址，点击重连；每条可单独删除 ×，也可「清除全部」）。仅首次或配置失效时出现，有配置时直接连接零打扰。
-- **断开连接 / 断开连接并关闭**：连接成功后标题栏显示当前地址与「断开连接 ▾」菜单——「断开连接」返回登录界面（本应用启动的本地服务保持后台运行）；「断开连接并关闭本地服务」一并停止服务（仅本应用启动的服务显示该选项）。托盘菜单同样提供这两项。菜单是**独立子窗口**（frameless + transparent）：不被 DSH 内容视图遮挡，且以 `showInactive` 打开、不抢键盘焦点；点击主窗口任意处 / Esc / 失焦自动收起。
+- **标题栏功能菜单**：连接成功后标题栏中部显示当前地址与「断开连接 ▾」；右侧动作区提供**窗口置顶**开关（激活态高亮）、「服务器 ▾」（启动本地 DSH 服务、停止本地服务、切换服务器、重新加载页面 / 强制重新加载[忽略缓存]、在浏览器中打开当前服务器）与「⋯」更多菜单（检查更新、关于、快捷键设置、缩放子菜单、退出）。断开菜单按连接形态显示：本应用启动的本地服务 → 「断开连接并关闭本地服务」；嗅探连接的外部本机实例 → 「断开连接并关闭服务器」（按端口定位监听进程并结束进程树，弹窗反馈结果；远程服务器无法从本机关闭）。全部为原生 `Menu.popup()`：绘制在所有 Web 内容之上（不被 DSH 内容视图遮挡），Esc / 点击外部自动收起（Windows/Linux 上跟随系统深浅色），菜单右侧组合键文案随当前绑定实时更新。
+- **快捷键绑定（应用内自定义）**：「⋯ → 快捷键设置…」面板查看 / 重绑全部快捷键——**全局唤起热键**与**内容视图快捷键**（页面内查找、重载、强制重载、缩放三档）点击即录制重绑（Esc 取消、Backspace 清除、与其他动作冲突即时拒绝并提示；字母/数字/符号需配合 Ctrl 或 Alt，F 功能键可单独绑定），绑定持久化、全局热键换绑即时重注册；面板打开期间 DSH 内容视图临时摘下，关闭后原样挂回不重载。`DSH_HOTKEY` 环境变量仅在从未自定义时生效（'off' = 解绑），一旦在面板重绑 / 重置即固定为面板值。
+- **内容视图工具**：连接后 `Ctrl+F` 页面内查找（标题栏下方查找栏：实时 `n/m` 计数、Enter / Shift+Enter 跳转、Esc 关闭并清除高亮，打开时内容视图自动下移让位）；`Ctrl+R` / `F5` 重新加载、`Ctrl+Shift+R` 忽略缓存强刷；`Ctrl+=` / `Ctrl+-` / `Ctrl+0` 按 Chromium 档位缩放（0.5–2.0，持久化记忆，「⋯」菜单缩放子菜单显示当前百分比）。快捷键统一由主进程在内容视图 `before-input-event` 捕获——DSH 页面保持**零注入**，且全部可重绑。
+- **托盘常驻**：关闭窗口 = 隐藏到托盘；完整功能菜单在标题栏（见上），托盘保留「打开/隐藏窗口 / 退出」兜底。单击托盘图标切换窗口显隐，提示文本显示当前连接地址。
 - **可配置 URL**：`--url` > `DSH_URL` > 共享配置，三级来源。
 - **DSH 风格自绘标题栏**：无边框窗口 + 自绘标题栏，匹配 Harness 设计平台 token，并跟随 DSH「外观」设置即时切换深浅色。
-- **托盘常驻**：关闭窗口 = 隐藏到托盘；托盘菜单「打开/隐藏窗口 / 管理服务器（启动本地 DSH 服务、停止本地服务、切换服务器）/ 窗口置顶 / 在浏览器中打开当前服务器 / 检查更新 / 关于 / 退出」，单击托盘图标切换窗口显隐，提示文本显示当前连接地址。
-- **全局快捷键**：默认 `Ctrl+Shift+D` 任意位置唤起/收起窗口（`DSH_HOTKEY` 环境变量可改，设 `off` 禁用）。
+- **全局快捷键**：默认 `Ctrl+Shift+D` 任意位置唤起/收起窗口（可在快捷键设置面板重绑；`DSH_HOTKEY` 环境变量仅在未自定义时生效，设 `off` 禁用）。
 - **深链协议 `dsh-shell://`**：`dsh-shell://show` 唤起窗口；`dsh-shell://open?url=<编码后的地址>` 直接连接指定服务器（远程地址仍走确认弹窗，仅 http/https）。
-- **窗口状态记忆**：记住上次窗口位置/尺寸与「置顶」状态（多显示器变化时自动校验，窗口不会落到屏幕外）。
+- **窗口状态记忆**：记住上次窗口位置/尺寸/最大化状态与「置顶」状态（多显示器变化时自动校验，窗口不会落到屏幕外）。
 - **退出询问**：由本应用启动了本地 DSH 服务时，关闭窗口会弹窗询问「同时关闭服务并退出 / 最小化到托盘 / 取消」；托盘退出同样询问。选择保持后服务继续在后台运行，下次启动可直接嗅探连接。
 - **断线自动重连**：DSH 重启/断连期间每 3 秒探测，服务恢复后自动重载页面。
 - **外链 http(s) 白名单**：`window.open` 与跨源导航一律拦截，仅放行 `http:`/`https:` 交给系统浏览器。
@@ -52,7 +54,7 @@ $env:DSH_URL="http://127.0.0.1:3080"; electron .
 | 变量 | 作用 |
 |------|------|
 | `DSH_URL` | 默认服务器地址（优先级低于 `--url`） |
-| `DSH_HOTKEY` | 全局快捷键（默认 `CommandOrControl+Shift+D`；设 `off` 禁用） |
+| `DSH_HOTKEY` | 全局快捷键初始值（默认 `CommandOrControl+Shift+D`；设 `off` 禁用；用户在快捷键设置里重绑/重置后以面板值为准） |
 | `DSH_UPDATE_URL` | 覆盖自动更新源（generic provider） |
 | `DSH_DESKTOP_CONFIG` | 覆盖共享配置文件路径 |
 | `--hidden` | 启动到托盘不弹窗口（开机自启自动附加） |
@@ -68,9 +70,12 @@ dsh-shell://open?url=http%3A%2F%2F127.0.0.1%3A3080%2F
 
 ```bash
 npm test                    # 全量：src 纯函数（vitest）+ 编译产物校验
-npm run test:unit           # 仅 src（vitest：url / sniffer / protocol / shell-state / dsh-launcher）
+npm run test:unit           # 仅 src（vitest：url / sniffer / protocol / shell-state / dsh-launcher /
+                            #  titlebar-menus / theme-prefs / server-stop / shortcuts / view-controls）
 npm run test:node           # Node 原生 runner（scripts/verify-url.mjs，不依赖 vite，
                             # 可在无子进程 spawn 的受限环境运行；会先编译 dist）
+node scripts/verify-server-stop.mjs   # 「关闭服务器」端到端（需 spawn：子进程起 dummy
+                            # 服务器 → 按端口定位结束 → 确认端口停止；见 server-stop.ts）
 ```
 
 （插件的测试在各自仓库内 `npm test`。）
@@ -116,22 +121,26 @@ npm run dist:linux   # AppImage + deb
 
 ```
 src/
-  main.ts            主进程：窗口 / 标题栏 / 托盘 / 退出询问 / 断线重连 / 轮询
+  main.ts            主进程：窗口 / 标题栏菜单 / 托盘 / 退出询问 / 断线重连 / 轮询
   config.ts          URL 来源解析（--url > DSH_URL > 共享配置）
   shared-config.ts   与 cordis 插件共享的配置读写（fs.watch 即时响应）
   dsh-launcher.ts    启动本地 dsh（PATH / npx 缓存 / DSH_HOME 三级查找）并嗅探 URL
-  conn-menu.ts       断开连接下拉菜单（独立子窗口：不被 DSH 视图遮挡、不抢焦点）
-  conn-menu.html     菜单窗口页面（断开连接 / 断开连接并关闭本地服务）
+  titlebar-menus.ts  标题栏下拉菜单模板：断开 / 服务器 / 更多（纯函数，原生 Menu.popup 呈现）
+  shortcuts.ts       快捷键绑定体系：动作 / 默认值 / 加速器解析校验 / 录制判定 / 冲突（纯函数，可测）
+  view-controls.ts   内容视图缩放档位 / 查找计数（纯函数，可测）
+  server-stop.ts     停止外部本机 DSH 服务器（netstat/lsof 按端口定位进程；解析纯函数可测）
+  shell-ui-state.ts  shell 页面 UI 状态统一推送（含加载竞态自愈）
   sniffer.ts         本地 DSH 实例嗅探（html + favicon 双特征判定）
   security.ts        外链 http(s) 白名单 + 敏感权限策略
   probe.ts           URL 就绪探测
   theme.ts           读取 DSH「外观」设置并跟随切换
+  theme-prefs.ts     settings.yaml/json 的外观偏好解析（纯函数，可测）
   updater.ts         自动更新（electron-updater）
-  url.ts             URL 校验 / CLI 解析 / 优先级（纯函数，可测）
+  url.ts             URL 校验 / CLI 解析 / 优先级 / 回环判定（纯函数，可测）
   protocol.ts        dsh-shell:// 深链解析（纯函数，可测）
-  shell-state.ts     窗口状态（bounds/置顶/最近连接）读写与校验（纯函数，可测）
+  shell-state.ts     窗口状态（bounds/最大化/置顶/最近连接）读写与校验（纯函数，可测）
   shell-preload.ts   标题栏 / login 窗口控制桥接
-  shell.html         标题栏 + login 界面（鲸鱼品牌区 + 三种连接方式 + 最近连接管理）
+  shell.html / shell.css / shell.js   标题栏 + login 界面（外置样式与脚本，CSP 无 unsafe-inline）
 scripts/
   clean.mjs           清空编译产物（防残留旧文件）
   copy-static.mjs / generate-icons.mjs / verify-url.mjs / smoke-ui.mjs（UI 冒烟，需先 build）

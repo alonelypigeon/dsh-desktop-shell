@@ -1,9 +1,11 @@
 // 外壳自身的本地状态（与 DSH/cordis 共享配置分离，互不干扰）：
 //   - 窗口 bounds / 置顶：记忆上次窗口位置与置顶状态
 //   - recentServers：最近连接过的服务器地址（login 界面展示，快速重连）
+//   - zoomFactor / shortcuts：内容视图缩放与快捷键绑定（见 view-controls.ts / shortcuts.ts）
 // 纯函数化设计：不 import electron，路径由调用方传入，便于 node:test 直接测试。
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { normalizeZoom } from './view-controls';
 
 export interface WindowBounds {
   x: number;
@@ -16,6 +18,12 @@ export interface ShellState {
   bounds?: WindowBounds;
   alwaysOnTop?: boolean;
   recentServers?: string[];
+  /** 上次退出时窗口是否最大化（重启时恢复；bounds 始终存普通态尺寸）。 */
+  maximized?: boolean;
+  /** 内容视图缩放系数（加载时经 normalizeZoom 规整到 0.5–2）。 */
+  zoomFactor?: number;
+  /** 快捷键绑定（action → 加速器；'' = 显式解绑；格式校验见 shortcuts.ts）。 */
+  shortcuts?: Record<string, string>;
 }
 
 export interface DisplayRect {
@@ -76,8 +84,17 @@ export function loadShellState(file: string): ShellState {
       }
     }
     if (typeof raw.alwaysOnTop === 'boolean') out.alwaysOnTop = raw.alwaysOnTop;
+    if (typeof raw.maximized === 'boolean') out.maximized = raw.maximized;
+    if (typeof raw.zoomFactor === 'number') out.zoomFactor = normalizeZoom(raw.zoomFactor);
     if (Array.isArray(raw.recentServers)) {
       out.recentServers = raw.recentServers.filter((u): u is string => typeof u === 'string');
+    }
+    if (raw.shortcuts && typeof raw.shortcuts === 'object' && !Array.isArray(raw.shortcuts)) {
+      const sc: Record<string, string> = {};
+      for (const [k, v] of Object.entries(raw.shortcuts as Record<string, unknown>)) {
+        if (typeof v === 'string') sc[k] = v;
+      }
+      out.shortcuts = sc;
     }
     return out;
   } catch {

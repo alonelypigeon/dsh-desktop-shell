@@ -172,10 +172,13 @@ export async function launchLocalDsh(options: DshLaunchOptions = {}): Promise<Ds
     let url: string | null = null;
     // 收集 stderr 尾部，启动失败（如指定端口被占用）时带给用户可读的原因。
     let stderrTail = '';
+    // 兜底超时 timer（cleanup 时清理）。
+    let timeoutTimer: NodeJS.Timeout | null = null;
 
     const cleanup = (): void => {
       if (settled) return;
       settled = true;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
       child.stdout?.removeAllListeners('data');
       child.stderr?.removeAllListeners('data');
     };
@@ -230,10 +233,11 @@ export async function launchLocalDsh(options: DshLaunchOptions = {}): Promise<Ds
       }
     });
 
-    // 兜底超时
-    setTimeout(() => {
+    // 兜底超时（settle 后由 cleanup 清理，unref 避免拖住进程退出）
+    timeoutTimer = setTimeout(() => {
       if (!settled) finish(null, 'dsh 启动超时');
     }, timeoutMs + 5000);
+    timeoutTimer.unref?.();
   });
 }
 

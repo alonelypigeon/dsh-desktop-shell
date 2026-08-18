@@ -14,7 +14,7 @@ import {
 } from 'electron';
 import * as path from 'node:path';
 import { resolveConfiguredUrl } from './config';
-import { validateUrl } from './url';
+import { validateUrl, isLoopbackHost } from './url';
 import { launchLocalDsh, normalizeRequestedPort, type DshService } from './dsh-launcher';
 import { probeUrl } from './probe';
 import { attachSecurity } from './security';
@@ -23,12 +23,37 @@ import { sniffLocalDsh } from './sniffer';
 import { readDshThemePreference, resolveIsDark, onSystemThemeChange, watchDshTheme } from './theme';
 import { setupAutoUpdater, checkForUpdatesNow } from './updater';
 import { loadShellState, saveShellState, mergeRecentServers, removeRecentServer, clearRecentServers, sanitizeBounds } from './shell-state';
-import { createConnMenu, type ConnMenu } from './conn-menu';
 import { parseDshShellUrl, PROTOCOL_SCHEME } from './protocol';
+import {
+  buildDisconnectMenuItems,
+  buildServerMenuItems,
+  buildMoreMenuItems,
+  isTitlebarMenuName,
+  type TitlebarMenuName,
+} from './titlebar-menus';
+import { pushShellUiState } from './shell-ui-state';
+import { stopExternalLocalServer } from './server-stop';
+import { ZOOM_DEFAULT, stepZoom, normalizeZoom, formatFindCount } from './view-controls';
+import {
+  DEFAULT_SHORTCUTS,
+  SHORTCUT_ACTIONS,
+  SHORTCUT_META,
+  conflictsFor,
+  findShortcutConflicts,
+  isShortcutAction,
+  matchContentShortcut,
+  normalizeAccelerator,
+  normalizeShortcutBindings,
+  recordingOutcome,
+  serializeShortcutBindings,
+  type RawKeyEvent,
+  type ShortcutAction,
+  type ShortcutBindings,
+} from './shortcuts';
 
 const TITLEBAR_HEIGHT = 42;
-// 全局快捷键默认值（可用 DSH_HOTKEY 环境变量覆盖；留空禁用）。
-const DEFAULT_HOTKEY = 'CommandOrControl+Shift+D';
+// 页面内查找栏高度（打开时内容视图下移让出这一条）
+const FINDBAR_HEIGHT = 40;
 
 let shellWindow: BrowserWindow | null = null;
 let contentView: WebContentsView | null = null;
@@ -50,8 +75,41 @@ let alwaysOnTop = false;
 let boundsSaveTimer: NodeJS.Timeout | null = null;
 let recentServers: string[] = [];
 let pendingProtocolUrl: string | null = null; // macOS 冷启动时 open-url 可能先于 ready 到达
-// 断开连接下拉菜单（独立小窗，见 conn-menu.ts）
-let connMenu: ConnMenu | null = null;
+// 内容视图缩放（档位与规整见 view-controls.ts），持久化在 shell-state.json
+let zoomFactor = ZOOM_DEFAULT;
+// 快捷键绑定（shortcuts.ts）：全局热键 + 内容视图快捷键，可在设置面板自定义
+let shortcutBindings: ShortcutBindings = { ...DEFAULT_SHORTCUTS };
+// DSH_HOTKEY 环境变量正在生效（仅当用户从未自定义过全局热键；重绑/重置后固定）
+let globalHotkeyEnvActive = false;
+let registeredGlobalAcc: string | null = null; // 当前已注册的全局热键（换绑时精确注销）
+// 页面内查找栏（内容视图 Ctrl+F 唤出；打开时内容视图下移让位）
+let findBarOpen = false;
+let lastFindText = '';
+// 快捷键设置面板：打开期间 DSH 内容视图临时摘下（否则会盖住 shell 页面）
+let settingsOpen = false;
+
+// —— 小工具 ——
+
+// 目标地址是否为本应用启动的本地服务。
+function isOwnedUrl(url: string | null): boolean {
+  return ownedDsh !== null && url !== null && ownedDsh.url === url;
+}
+
+// 当前连接是否为本应用启动的本地服务（标题栏菜单 / 托盘菜单 / 连接状态共用）。
+function isOwnedConnection(): boolean {
+  return isOwnedUrl(connectedUrl);
+}
+
+// 当前连接是否为「非本应用启动」的本机实例（嗅探连接的外部 DSH）。
+// 断开菜单据此显示「断开连接并关闭服务器」（按端口结束进程）。
+function isExternalLocalConnection(): boolean {
+  if (connectedUrl === null || isOwnedConnection()) return false;
+  try {
+    return isLoopbackHost(new URL(connectedUrl).hostname);
+  } catch {
+    return false;
+  }
+}
 
 function shellStateFile(): string {
   return path.join(app.getPath('userData'), 'shell-state.json');
@@ -113,6 +171,9 @@ function setupWindowControlIpc(win: BrowserWindow): void {
   ipcMain.on('shell:close', (e) => {
     if (guard(e)) win.close(); // close 事件里会转入托盘
   });
+  ipcMain.on('shell:toggle-always-on-top', (e) => {
+    if (guard(e)) applyAlwaysOnTop(!alwaysOnTop);
+  });
 
   win.on('maximize', () => win.webContents.send('shell:maximize-changed', true));
   win.on('unmaximize', () => win.webContents.send('shell:maximize-changed', false));
@@ -123,7 +184,9 @@ function setupWindowControlIpc(win: BrowserWindow): void {
 function updateContentViewBounds(): void {
   if (!shellWindow || !contentView) return;
   const [w, h] = shellWindow.getContentSize();
-  contentView.setBounds({ x: 0, y: TITLEBAR_HEIGHT, width: w, height: Math.max(0, h - TITLEBAR_HEIGHT) });
+  // 查找栏打开时内容视图下移让位（shell 页面在标题栏下渲染这一条）
+  const top = TITLEBAR_HEIGHT + (findBarOpen ? FINDBAR_HEIGHT : 0);
+  contentView.setBounds({ x: 0, y: top, width: w, height: Math.max(0, h - top) });
 }
 
 // —— 窗口状态记忆（bounds / 置顶） ——
@@ -138,15 +201,53 @@ function saveBoundsNow(): void {
     clearTimeout(boundsSaveTimer);
     boundsSaveTimer = null;
   }
-  if (!shellWindow || shellWindow.isMinimized() || shellWindow.isMaximized()) return;
-  saveShellState(shellStateFile(), { bounds: shellWindow.getBounds() });
+  if (!shellWindow || shellWindow.isDestroyed()) return;
+  const maximized = shellWindow.isMaximized();
+  // bounds 只存普通态尺寸（最大化时保留文件里的旧值，不清空不覆盖）；
+  // maximized 标志始终同步，重启时按它恢复。
+  const patch: Partial<{ bounds: Electron.Rectangle; maximized: boolean }> = { maximized };
+  if (!maximized && !shellWindow.isMinimized()) patch.bounds = shellWindow.getBounds();
+  saveShellState(shellStateFile(), patch);
 }
 
 function applyAlwaysOnTop(on: boolean): void {
   alwaysOnTop = on;
   shellWindow?.setAlwaysOnTop(on);
   saveShellState(shellStateFile(), { alwaysOnTop: on });
+  // 同步标题栏置顶按钮激活态
+  if (shellWindow && !shellWindow.isDestroyed()) {
+    shellWindow.webContents.send('shell:alwayson-changed', on);
+  }
   updateTrayMenu();
+}
+
+// 退出决策弹窗（窗口 ✕ 与托盘「退出」共用，kind 决定按钮文案）。
+// 返回 'stop'（同时关服务）/'keep'（保持服务）/'cancel'；对话框已打开时重入返回 null。
+async function promptQuitDecision(kind: 'close-window' | 'quit'): Promise<'stop' | 'keep' | 'cancel' | null> {
+  if (quitDialogOpen || !ownedDsh) return null;
+  quitDialogOpen = true;
+  const isWindowClose = kind === 'close-window';
+  const options: Electron.MessageBoxOptions = {
+    type: 'question',
+    title: isWindowClose ? '关闭 DeepSeek Harness Shell' : '退出 DeepSeek Harness Shell',
+    message: '是否同时关闭由本应用启动的本地 DSH 服务？',
+    detail: isWindowClose
+      ? `本地服务地址：${ownedDsh.url}`
+      : `本地服务地址：${ownedDsh.url}\n选择「保持服务运行」后，服务继续在后台运行，下次启动可直接嗅探连接。`,
+    buttons: isWindowClose
+      ? ['同时关闭服务并退出', '最小化到托盘', '取消']
+      : ['同时关闭服务', '保持服务运行', '取消退出'],
+    defaultId: isWindowClose ? 1 : 0,
+    cancelId: 2,
+    noLink: true,
+  };
+  const parent = shellWindow && !shellWindow.isDestroyed() && shellWindow.isVisible() ? shellWindow : null;
+  try {
+    const r = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+    return r.response === 0 ? 'stop' : r.response === 1 ? 'keep' : 'cancel';
+  } finally {
+    quitDialogOpen = false;
+  }
 }
 
 function createShellWindow(): void {
@@ -156,6 +257,8 @@ function createShellWindow(): void {
   // 恢复上次的窗口位置/尺寸（校验可见性，屏幕布局变化时回退默认值）。
   const state = loadShellState(shellStateFile());
   recentServers = state.recentServers ?? [];
+  zoomFactor = normalizeZoom(state.zoomFactor);
+  loadShortcutBindings(state.shortcuts);
   const restored = sanitizeBounds(state.bounds, screen.getAllDisplays().map((d) => d.workArea));
 
   const win = new BrowserWindow({
@@ -185,13 +288,37 @@ function createShellWindow(): void {
     win.setAlwaysOnTop(true);
   }
 
+  // 竞态修复：connectTo 对本机服务几毫秒即完成，attachContentView 推送的
+  // 状态可能在渲染器加载 shell.js 之前发出而被丢弃 → 标题栏连接状态
+  // 永远不显示。页面每次加载完成后重发全部 UI 状态使其自愈（shell-ui-state.ts）。
+  win.webContents.on('did-finish-load', () => {
+    const w = shellWindow;
+    if (!w || w.isDestroyed()) return;
+    pushShellUiState(w.webContents, {
+      connectedUrl,
+      owned: isOwnedConnection(),
+      maximized: w.isMaximized(),
+      alwaysOnTop,
+      findBarVisible: findBarOpen,
+      settingsVisible: settingsOpen,
+    });
+    // 设置面板开着时页面重载 → 重发面板所需数据（自愈，同上）
+    if (settingsOpen) pushShortcutsState();
+  });
+
+  // 上次退出时最大化 → 恢复最大化（Windows 对「关闭时最大化」的窗口有
+  // 重开自动最大化的启发式，但应用侧的图标/状态需要自己对齐）。
+  if (state.maximized) win.maximize();
+
   win.once('ready-to-show', () => {
     // 开机自启（--hidden）时不打扰：窗口留在托盘，用户从托盘/快捷键唤出。
     if (!startHidden) win.show();
   });
 
   win.on('close', (e) => {
-    if (isQuitting) return; // 真正退出流程：放行
+    // 真正退出流程放行——但退出弹窗还在等待用户决定时不放行：
+    // 否则窗口先被销毁，用户随后选「取消退出」就再也没有窗口可唤了。
+    if (isQuitting && !quitDialogOpen) return;
     e.preventDefault();
 
     // 用户此前已做过决定（例如选了「最小化到托盘」）→ 不再重复询问
@@ -204,22 +331,11 @@ function createShellWindow(): void {
       win.hide();
       return;
     }
+    // 退出询问弹窗已打开（托盘「退出」触发）→ 等它决出结果，保持窗口现状
     if (quitDialogOpen) return;
-    quitDialogOpen = true;
-    const options: Electron.MessageBoxOptions = {
-      type: 'question',
-      title: '关闭 DeepSeek Harness Shell',
-      message: '是否同时关闭由本应用启动的本地 DSH 服务？',
-      detail: `本地服务地址：${ownedDsh.url}`,
-      buttons: ['同时关闭服务并退出', '最小化到托盘', '取消'],
-      defaultId: 1,
-      cancelId: 2,
-      noLink: true,
-    };
-    void dialog.showMessageBox(win, options).then((r) => {
-      quitDialogOpen = false;
-      if (r.response === 2) return; // 取消：窗口保持打开
-      if (r.response === 0) {
+    void promptQuitDecision('close-window').then((decision) => {
+      if (decision === null || decision === 'cancel') return; // 取消：窗口保持打开
+      if (decision === 'stop') {
         // 同时关闭服务并退出
         quitDecision = 'stop';
         isQuitting = true;
@@ -236,17 +352,15 @@ function createShellWindow(): void {
     scheduleBoundsSave();
   });
   win.on('move', scheduleBoundsSave);
+  // 最大化状态变化 → 持久化 maximized 标志（bounds 只存普通态尺寸）
+  win.on('maximize', scheduleBoundsSave);
+  win.on('unmaximize', scheduleBoundsSave);
   win.on('show', updateTrayMenu);
   win.on('hide', updateTrayMenu);
-  // 窗口真正销毁时连带销毁断开连接菜单（move/resize/hide 时菜单在
-  // conn-menu.ts 内自行收起）
-  win.on('closed', () => {
-    connMenu?.destroy();
-    connMenu = null;
-  });
 
   setupWindowControlIpc(win);
   setupLoginIpc(win);
+  setupShortcutsIpc(win);
 
   // 加载标题栏 + login 界面（把当前主题作为初始值传入）
   void win.loadFile(path.join(__dirname, 'shell.html'), {
@@ -268,7 +382,33 @@ function attachContentView(url: string): void {
       },
     });
     contentView = view;
-    shellWindow.contentView.addChildView(view);
+    // 恢复持久化的缩放（视图销毁重建后重新应用）
+    view.webContents.setZoomFactor(zoomFactor);
+    // 快捷键绑定是自定义的（shortcuts.ts），这里统一在视图层捕获分派
+    view.webContents.on('before-input-event', (e, input) => {
+      if (input.type !== 'keyDown') return;
+      // Esc 关闭查找栏（焦点回到页面但查找栏还开着的情况）
+      if (input.key === 'Escape' && findBarOpen) {
+        e.preventDefault();
+        closeFindBar();
+        return;
+      }
+      const action = matchContentShortcut(shortcutBindings, input);
+      if (action === null) return; // 与外壳无关，放行给 DSH 页面
+      e.preventDefault();
+      runContentAction(action);
+    });
+    // 页面内查找结果 → 查找栏计数
+    view.webContents.on('found-in-page', (_e, result) => {
+      // finalUpdate=false 是中间计数，等最终结果再推送，避免计数闪烁
+      if (!result.finalUpdate) return;
+      shellWindow?.webContents.send(
+        'shell:find-result',
+        formatFindCount(result.activeMatchOrdinal, result.matches),
+      );
+    });
+    // 设置面板打开期间不挂载（否则会盖住 shell 页面的面板），关闭时补挂
+    if (!settingsOpen) shellWindow.contentView.addChildView(view);
     view.webContents.on('did-fail-load', (_e, code, desc, validatedUrl) => {
       if (code === -3) return;
       console.error(`[shell] failed to load ${validatedUrl}: ${desc} (${code})`);
@@ -290,12 +430,256 @@ function sendConnectionState(): void {
   shellWindow?.webContents.send('shell:connection-changed', {
     connected: connectedUrl !== null,
     url: connectedUrl,
-    owned: !!ownedDsh && ownedDsh.url === connectedUrl,
+    owned: isOwnedConnection(),
   });
+}
+
+// —— 内容视图操作（快捷键与「服务器 / 更多」菜单共用） ——
+
+function runContentAction(action: ShortcutAction): void {
+  switch (action) {
+    case 'find':
+      openFindBar();
+      break;
+    case 'reload':
+      reloadContent(false);
+      break;
+    case 'reload-hard':
+      reloadContent(true);
+      break;
+    case 'zoom-in':
+      applyZoom(stepZoom(zoomFactor, 'in'));
+      break;
+    case 'zoom-out':
+      applyZoom(stepZoom(zoomFactor, 'out'));
+      break;
+    case 'zoom-reset':
+      applyZoom(ZOOM_DEFAULT);
+      break;
+    default:
+      break; // 全局动作不经这里（globalShortcut 已注册）
+  }
+}
+
+function applyZoom(z: number): void {
+  if (z === zoomFactor) return;
+  zoomFactor = z;
+  contentView?.webContents.setZoomFactor(z);
+  saveShellState(shellStateFile(), { zoomFactor: z });
+}
+
+function reloadContent(ignoreCache: boolean): void {
+  if (!contentView) return;
+  if (ignoreCache) contentView.webContents.reloadIgnoringCache();
+  else contentView.webContents.reload();
+}
+
+// —— 页面内查找栏（内容视图 Ctrl+F 唤出；打开时内容视图下移让位） ——
+
+function openFindBar(): void {
+  const w = shellWindow;
+  if (!w || w.isDestroyed() || !contentView || findBarOpen) return;
+  findBarOpen = true;
+  updateContentViewBounds();
+  // 键盘焦点此前在 DSH 内容视图上：先把焦点转回 shell 页面，
+  // 渲染层随可见消息执行 input.focus() 才能真正接收输入。
+  w.webContents.focus();
+  w.webContents.send('shell:find-visible', true);
+}
+
+function closeFindBar(): void {
+  if (!findBarOpen) return;
+  findBarOpen = false;
+  lastFindText = '';
+  contentView?.webContents.stopFindInPage('clearSelection');
+  shellWindow?.webContents.send('shell:find-visible', false);
+  updateContentViewBounds();
+  contentView?.webContents.focus();
+}
+
+// —— 快捷键绑定（shortcuts.ts；设置面板可自定义） ——
+
+// 从持久化恢复绑定。DSH_HOTKEY 环境变量只在用户从未自定义过全局热键时
+// 生效（'off'/空 = 解绑）；一旦在面板里重绑或重置，持久化值固定优先。
+function loadShortcutBindings(raw: Record<string, string> | undefined): void {
+  shortcutBindings = normalizeShortcutBindings(raw);
+  const envHotkey = process.env.DSH_HOTKEY?.trim();
+  if (envHotkey !== undefined && raw?.['global-toggle-window'] === undefined) {
+    if (envHotkey === '' || envHotkey.toLowerCase() === 'off') {
+      shortcutBindings['global-toggle-window'] = null;
+      globalHotkeyEnvActive = true;
+    } else {
+      const norm = normalizeAccelerator(envHotkey);
+      if (norm !== null) {
+        shortcutBindings['global-toggle-window'] = norm;
+        globalHotkeyEnvActive = true;
+      } else {
+        console.warn(`[shell] invalid DSH_HOTKEY ignored: ${envHotkey}`);
+      }
+    }
+  }
+  applyGlobalHotkey();
+}
+
+// 精确换绑全局热键：先注销旧加速器再注册新的（注册失败保留解绑态并告警）。
+function applyGlobalHotkey(): void {
+  if (registeredGlobalAcc !== null) {
+    try {
+      globalShortcut.unregister(registeredGlobalAcc);
+    } catch {
+      /* ignore */
+    }
+    registeredGlobalAcc = null;
+  }
+  const acc = shortcutBindings['global-toggle-window'];
+  if (!acc) {
+    console.log('[shell] global shortcut disabled');
+    return;
+  }
+  try {
+    const ok = globalShortcut.register(acc, () => toggleWindow());
+    if (ok) {
+      registeredGlobalAcc = acc;
+      console.log(`[shell] global shortcut registered: ${acc}`);
+    } else {
+      console.warn(`[shell] global shortcut register FAILED (taken by another app?): ${acc}`);
+    }
+  } catch (e) {
+    console.warn('[shell] global shortcut unavailable:', e);
+  }
+}
+
+// 写入一条绑定并持久化；全局热键即时重注册。
+function applyShortcutBinding(action: ShortcutAction, acc: string | null): void {
+  shortcutBindings[action] = acc;
+  saveShellState(shellStateFile(), { shortcuts: serializeShortcutBindings(shortcutBindings) });
+  if (action === 'global-toggle-window') {
+    globalHotkeyEnvActive = false; // 用户显式选择后，环境变量不再参与
+    applyGlobalHotkey();
+  }
+}
+
+// 向设置面板推送完整状态（绑定 + 元信息 + 冲突 + 环境变量覆盖标志）
+function pushShortcutsState(): void {
+  const w = shellWindow;
+  if (!w || w.isDestroyed()) return;
+  w.webContents.send('shell:shortcuts-state', {
+    bindings: shortcutBindings,
+    actions: SHORTCUT_ACTIONS,
+    meta: SHORTCUT_META,
+    conflicts: findShortcutConflicts(shortcutBindings),
+    envOverride: globalHotkeyEnvActive,
+    isMac: process.platform === 'darwin',
+  });
+}
+
+// —— 快捷键设置面板（「更多」菜单打开） ——
+
+// DSH 内容视图始终合成在 shell 页面之上，面板打开期间临时摘下视图，
+// 关闭时原样挂回（连接状态不变，页面不重载）。
+function openShortcutsSettings(): void {
+  const w = shellWindow;
+  if (!w || w.isDestroyed() || settingsOpen) return;
+  settingsOpen = true;
+  showWindow();
+  if (contentView) w.contentView.removeChildView(contentView);
+  // 焦点交给 shell 页面：面板按钮与录制捕获需要键盘输入
+  w.webContents.focus();
+  w.webContents.send('shell:settings-visible', true);
+  pushShortcutsState();
+}
+
+function closeShortcutsSettings(): void {
+  if (!settingsOpen) return;
+  settingsOpen = false;
+  const w = shellWindow;
+  if (!w || w.isDestroyed()) return;
+  if (contentView) {
+    w.contentView.addChildView(contentView);
+    updateContentViewBounds();
+    contentView.webContents.focus();
+  }
+  w.webContents.send('shell:settings-visible', false);
+}
+
+// 设置面板 IPC（invoke 式：渲染层录制/重置后立即拿结果； sender 仅限 shell 窗口）
+function setupShortcutsIpc(win: BrowserWindow): void {
+  const guard = (event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): boolean =>
+    event.sender === win.webContents;
+
+  ipcMain.handle('shell:shortcuts-get', (e) => {
+    if (!guard(e)) return null;
+    pushShortcutsState();
+    return true;
+  });
+
+  // 录制：渲染层把 keydown 的原始修饰键/键位发来，判定与冲突检查都在主进程
+  ipcMain.handle('shell:shortcuts-record', (e, action: unknown, raw: unknown) => {
+    if (!guard(e) || !isShortcutAction(action)) return { ok: false, error: '无效动作' };
+    const ev = normalizeRawKeyEvent(raw);
+    if (ev === null) return { ok: false, error: '无效按键事件' };
+    const outcome = recordingOutcome(ev);
+    if (outcome.kind === 'pending') return { ok: true, pending: true };
+    if (outcome.kind === 'cancel') return { ok: true, cancelled: true };
+    if (outcome.kind === 'clear') {
+      applyShortcutBinding(action, null);
+      pushShortcutsState();
+      return { ok: true, cleared: true };
+    }
+    if (outcome.kind === 'invalid') return { ok: false, error: outcome.reason };
+    const others = conflictsFor(action, outcome.accelerator, shortcutBindings);
+    if (others.length > 0) {
+      const names = others.map((a) => SHORTCUT_META[a].label).join('、');
+      return { ok: false, error: `与「${names}」的快捷键冲突` };
+    }
+    applyShortcutBinding(action, outcome.accelerator);
+    pushShortcutsState();
+    return { ok: true };
+  });
+
+  // 重置：单个动作回默认，或 'all' 恢复全部默认
+  ipcMain.handle('shell:shortcuts-reset', (e, scope: unknown) => {
+    if (!guard(e)) return { ok: false, error: '无效请求' };
+    if (scope === 'all') {
+      shortcutBindings = { ...DEFAULT_SHORTCUTS };
+      globalHotkeyEnvActive = false;
+      saveShellState(shellStateFile(), { shortcuts: serializeShortcutBindings(shortcutBindings) });
+      applyGlobalHotkey();
+      pushShortcutsState();
+      return { ok: true };
+    }
+    if (!isShortcutAction(scope)) return { ok: false, error: '无效动作' };
+    applyShortcutBinding(scope, DEFAULT_SHORTCUTS[scope]);
+    pushShortcutsState();
+    return { ok: true };
+  });
+
+  ipcMain.on('shell:settings-close', (e) => {
+    if (guard(e)) closeShortcutsSettings();
+  });
+}
+
+function normalizeRawKeyEvent(raw: unknown): RawKeyEvent | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.key !== 'string') return null;
+  return {
+    key: r.key,
+    control: r.control === true,
+    shift: r.shift === true,
+    alt: r.alt === true,
+    meta: r.meta === true,
+  };
 }
 
 // 移除 DSH 内容视图，重新显示 login 界面（切换服务器）。
 function detachContentView(): void {
+  // 内容视图即将销毁：收起查找栏（不必 stopFindInPage，视图马上关闭）
+  if (findBarOpen) {
+    findBarOpen = false;
+    lastFindText = '';
+    shellWindow?.webContents.send('shell:find-visible', false);
+  }
   if (shellWindow && contentView) {
     shellWindow.contentView.removeChildView(contentView);
     contentView.webContents.close();
@@ -385,6 +769,31 @@ function setupLoginIpc(win: BrowserWindow): void {
     disconnectAndStop();
   });
 
+  // —— 页面内查找（查找栏在标题栏下方，内容视图快捷键唤出） ——
+  ipcMain.on('shell:find', (e, text: unknown) => {
+    if (!guard(e)) return;
+    if (!contentView) return;
+    lastFindText = typeof text === 'string' ? text : '';
+    if (lastFindText === '') {
+      contentView.webContents.stopFindInPage('clearSelection');
+      win.webContents.send('shell:find-result', '');
+      return;
+    }
+    contentView.webContents.findInPage(lastFindText, { forward: true });
+  });
+
+  // 上一个/下一个匹配（dir=1 向下，-1 向上）
+  ipcMain.on('shell:find-next', (e, dir: unknown) => {
+    if (!guard(e)) return;
+    if (!contentView || lastFindText === '') return;
+    contentView.webContents.findInPage(lastFindText, { forward: dir !== -1, findNext: true });
+  });
+
+  ipcMain.on('shell:find-close', (e) => {
+    if (!guard(e)) return;
+    closeFindBar();
+  });
+
   // 最近连接列表（login 界面展示）
   ipcMain.on('login:recent', (e) => {
     if (!guard(e)) return;
@@ -409,9 +818,10 @@ function setupLoginIpc(win: BrowserWindow): void {
     win.webContents.send('login:recent-result', recentServers);
   });
 
-  // 打开/关闭断开连接下拉菜单（conn-menu.html 独立小窗）
-  ipcMain.on('shell:conn-menu-open', (e, anchor: unknown) => {
+  // 打开标题栏下拉菜单（disconnect / server / more，原生 Menu.popup）
+  ipcMain.on('shell:open-titlebar-menu', (e, name: unknown, anchor: unknown) => {
     if (!guard(e)) return;
+    if (!isTitlebarMenuName(name)) return;
     if (!anchor || typeof anchor !== 'object') return;
     const r = anchor as { x?: unknown; y?: unknown; width?: unknown; height?: unknown };
     if (
@@ -422,27 +832,66 @@ function setupLoginIpc(win: BrowserWindow): void {
     ) {
       return;
     }
-    openConnMenu({ x: r.x, y: r.y, width: r.width, height: r.height });
-  });
-  ipcMain.on('shell:conn-menu-close', (e) => {
-    if (!guard(e)) return;
-    connMenu?.close();
+    openTitlebarMenu(name, { x: r.x, y: r.y, width: r.width, height: r.height });
   });
 }
 
-// 打开断开连接下拉菜单：懒创建子窗口，锚定在标题栏按钮正下方。
-function openConnMenu(anchor: Electron.Rectangle): void {
-  if (!shellWindow) return;
-  if (!connMenu) {
-    connMenu = createConnMenu(shellWindow, {
-      disconnect: () => disconnectConnection(),
-      disconnectAndStop: () => disconnectAndStop(),
-    });
+// 打开标题栏下拉菜单：原生菜单绘制在所有 Web 内容之上（不被 DSH 内容
+// 视图遮挡），Esc / 点击外部 / 窗口失焦自动收起，无需任何子窗口状态管理。
+function openTitlebarMenu(name: TitlebarMenuName, anchor: Electron.Rectangle): void {
+  if (!shellWindow || shellWindow.isDestroyed()) return;
+  let items: Electron.MenuItemConstructorOptions[];
+  if (name === 'disconnect') {
+    items = buildDisconnectMenuItems(
+      { owned: isOwnedConnection(), externalLocal: isExternalLocalConnection() },
+      {
+        disconnect: () => disconnectConnection(),
+        disconnectAndStop: () => disconnectAndStop(),
+        disconnectAndStopServer: () => void disconnectAndStopServer(),
+      },
+    );
+  } else if (name === 'server') {
+    items = buildServerMenuItems(
+      { ownedRunning: ownedDsh !== null, connectedUrl, accelerators: shortcutBindings },
+      {
+        startLocal: () => {
+          showWindow();
+          void startLocalService(shellWindow);
+        },
+        stopLocal: () => stopLocalService(),
+        switchServer: () => switchServer(),
+        reload: () => reloadContent(false),
+        reloadHard: () => reloadContent(true),
+        openInBrowser: connectedUrl
+          ? () => {
+              void shell.openExternal(connectedUrl!);
+            }
+          : null,
+      },
+    );
+  } else {
+    items = buildMoreMenuItems(
+      { zoomFactor, accelerators: shortcutBindings },
+      {
+        zoomIn: () => applyZoom(stepZoom(zoomFactor, 'in')),
+        zoomOut: () => applyZoom(stepZoom(zoomFactor, 'out')),
+        zoomReset: () => applyZoom(ZOOM_DEFAULT),
+        shortcuts: () => openShortcutsSettings(),
+        checkUpdates: () => checkForUpdatesNow(),
+        about: () => showAboutDialog(),
+        quit: () => {
+          isQuitting = true;
+          app.quit();
+        },
+      },
+    );
   }
-  connMenu.open(anchor, {
-    owned: !!ownedDsh && ownedDsh.url === connectedUrl,
-    dark: currentThemeDark ?? resolveIsDark(readDshThemePreference()),
-  });
+  const menu = Menu.buildFromTemplate(items);
+  // 渲染层坐标（CSS px = DIP）→ 屏幕坐标：frameless 窗口内容区即整个窗口。
+  const cb = shellWindow.getContentBounds();
+  const x = Math.round(cb.x + anchor.x);
+  const y = Math.round(cb.y + anchor.y + anchor.height + 4);
+  menu.popup({ window: shellWindow, x, y });
 }
 
 // 校验 + 确认 + 连接一条 URL；非回环地址弹确认（深链触发的远程地址同样受保护）。
@@ -459,10 +908,8 @@ async function joinRemoteUrl(rawUrl: string): Promise<void> {
     return;
   }
 
-  // 非回环地址 → 弹确认
-  const host = new URL(url).hostname;
-  const isLoopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
-  if (!isLoopback) {
+  // 非回环地址 → 弹确认（isLoopbackHost 处理 127.0.0.0/8 / localhost / [::1]）
+  if (!isLoopbackHost(new URL(url).hostname)) {
     const parent = shellWindow && shellWindow.isVisible() ? shellWindow : undefined;
     const options: Electron.MessageBoxOptions = {
       type: 'question',
@@ -487,7 +934,7 @@ async function joinRemoteUrl(rawUrl: string): Promise<void> {
 // —— 连接：探测连通后挂载视图；失败回 login 并报错 ——
 
 async function connectTo(url: string): Promise<boolean> {
-  const knownOwn = ownedDsh && ownedDsh.url === url;
+  const knownOwn = isOwnedUrl(url);
   if (!knownOwn && !(await probeUrl(url))) {
     showLoginError(`无法连接到 ${url}`);
     detachContentView();
@@ -499,6 +946,9 @@ async function connectTo(url: string): Promise<boolean> {
   saveShellState(shellStateFile(), { recentServers });
   attachContentView(url);
   updateTrayMenu();
+  // 连接成功也要通知 login 表单复位 busy 态：login 只是隐藏不是卸载，
+  // 不发这条「连接中…」会一直残留到「切换服务器」回来（按钮禁用 + 文案停旧）。
+  shellWindow?.webContents.send('login:result', { ok: true });
   return true;
 }
 
@@ -561,7 +1011,6 @@ function stopLocalService(): void {
 // 断开连接：回到 login 界面；本应用启动的本地服务保持后台运行（可再嗅探连接）。
 // 显式断开会清掉共享配置里的 url，避免下次启动自动重连到同一服务器。
 function disconnectConnection(): void {
-  connMenu?.close();
   detachContentView();
   saveSharedConfig({ url: undefined });
   showWindow();
@@ -569,77 +1018,61 @@ function disconnectConnection(): void {
 
 // 断开连接并关闭：若当前连接的是本应用启动的本地服务，一并停止它。
 function disconnectAndStop(): void {
-  connMenu?.close();
   const url = connectedUrl;
   detachContentView();
-  if (ownedDsh && ownedDsh.url === url) {
-    ownedDsh.stop();
+  if (isOwnedUrl(url)) {
+    ownedDsh?.stop();
     ownedDsh = null;
   }
   saveSharedConfig({ url: undefined });
   showWindow();
 }
 
+// 断开连接并关闭服务器：针对非本应用启动的本机实例（嗅探连接）。
+// 先断开回 login，再按端口定位并结束服务器进程，结果弹窗反馈。
+async function disconnectAndStopServer(): Promise<void> {
+  const url = connectedUrl;
+  if (!url) return;
+  detachContentView();
+  saveSharedConfig({ url: undefined });
+  showWindow();
+  const result = await stopExternalLocalServer(url);
+  const parent = shellWindow && !shellWindow.isDestroyed() && shellWindow.isVisible() ? shellWindow : undefined;
+  const options: Electron.MessageBoxOptions = {
+    type: result.ok ? 'info' : 'warning',
+    title: '关闭服务器',
+    message: result.ok ? '本机 DSH 服务器已停止' : '无法停止本机服务器',
+    detail: result.detail,
+    buttons: ['确定'],
+    noLink: true,
+  };
+  void (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+}
+
+// —— 关于对话框（标题栏「更多」菜单用） ——
+
+function showAboutDialog(): void {
+  const parent = shellWindow && !shellWindow.isDestroyed() && shellWindow.isVisible() ? shellWindow : undefined;
+  const options: Electron.MessageBoxOptions = {
+    type: 'info',
+    title: '关于 DeepSeek Harness Shell',
+    message: `DeepSeek Harness Shell v${app.getVersion()}`,
+    detail: '社区实验项目，非 DeepSeek 官方产品。\nMIT License · dsh-desktop-shell contributors',
+    buttons: ['确定'],
+    noLink: true,
+  };
+  void (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+}
+
 // —— 托盘 ——
+// 服务器管理 / 置顶 / 断开连接 / 更新 / 关于已上移到标题栏菜单（可见性更好）；
+// 托盘只保留窗口控制与退出作为窗口不可用时的兜底入口。
 
 function createTrayMenu(): Electron.Menu {
   const template: MenuItemConstructorOptions[] = [
     {
       label: shellWindow?.isVisible() ? '隐藏窗口' : '打开窗口',
       click: () => toggleWindow(),
-    },
-    {
-      label: '管理服务器',
-      submenu: [
-        {
-          label: '启动本地 DSH 服务',
-          click: () => {
-            showWindow();
-            void startLocalService(shellWindow);
-          },
-        },
-        { label: '停止本地 DSH 服务', click: () => stopLocalService() },
-        { type: 'separator' },
-        { label: '切换服务器…', click: () => switchServer() },
-      ],
-    },
-    { type: 'separator' },
-    {
-      label: '窗口置顶',
-      type: 'checkbox',
-      checked: alwaysOnTop,
-      click: (item) => applyAlwaysOnTop(item.checked),
-    },
-  ];
-
-  // 已连接时：在浏览器里打开当前服务器 / 断开连接
-  if (connectedUrl) {
-    template.push({
-      label: '在浏览器中打开当前服务器',
-      click: () => void shell.openExternal(connectedUrl!),
-    });
-    template.push({ label: '断开连接', click: () => disconnectConnection() });
-    if (ownedDsh && ownedDsh.url === connectedUrl) {
-      template.push({ label: '断开连接并关闭本地服务', click: () => disconnectAndStop() });
-    }
-  }
-
-  template.push(
-    { label: '检查更新…', click: () => checkForUpdatesNow() },
-    {
-      label: '关于 DeepSeek Harness Shell',
-      click: () => {
-        const parent = shellWindow && shellWindow.isVisible() ? shellWindow : undefined;
-        const options: Electron.MessageBoxOptions = {
-          type: 'info',
-          title: '关于 DeepSeek Harness Shell',
-          message: `DeepSeek Harness Shell v${app.getVersion()}`,
-          detail: '社区实验项目，非 DeepSeek 官方产品。\nMIT License · dsh-desktop-shell contributors',
-          buttons: ['确定'],
-          noLink: true,
-        };
-        void (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
-      },
     },
     { type: 'separator' },
     {
@@ -649,7 +1082,7 @@ function createTrayMenu(): Electron.Menu {
         app.quit();
       },
     },
-  );
+  ];
 
   return Menu.buildFromTemplate(template);
 }
@@ -716,20 +1149,9 @@ function registerProtocolClient(): void {
 }
 
 // —— 全局快捷键：任意地方唤起/收起窗口 ——
-
-function setupGlobalShortcut(): void {
-  const hotkey = process.env.DSH_HOTKEY?.trim() || DEFAULT_HOTKEY;
-  if (hotkey === '' || hotkey === 'off') {
-    console.log('[shell] global shortcut disabled');
-    return;
-  }
-  try {
-    const ok = globalShortcut.register(hotkey, () => toggleWindow());
-    console.log(`[shell] global shortcut ${ok ? 'registered' : 'FAILED'}: ${hotkey}`);
-  } catch (e) {
-    console.warn('[shell] global shortcut unavailable:', e);
-  }
-}
+// 注册在 loadShortcutBindings / applyShortcutBinding 里随绑定走
+//（默认 CommandOrControl+Shift+D，「更多 → 快捷键设置」可重绑；
+//  DSH_HOTKEY 环境变量在用户未自定义时生效，'off'/空 = 解绑）。
 
 // —— 主题：跟随 DSH appearance（settings.yaml 的 ui-theme.preference） ——
 
@@ -820,7 +1242,6 @@ async function bootstrap(): Promise<void> {
     migrateLegacyConfig();
 
     registerProtocolClient();
-    setupGlobalShortcut();
 
     createShellWindow();
     createTray();
@@ -862,31 +1283,16 @@ app.on('before-quit', (e) => {
   // 由本应用启动了本地 DSH 服务且尚未决定 → 弹窗询问是否同时关闭
   if (ownedDsh && quitDecision === null) {
     e.preventDefault();
+    // 窗口 ✕ 触发的询问已在进行 → 等它决出结果（stop 会再次触发 quit）
     if (quitDialogOpen) return;
-    quitDialogOpen = true;
-    const options: Electron.MessageBoxOptions = {
-      type: 'question',
-      title: '退出 DeepSeek Harness Shell',
-      message: '是否同时关闭由本应用启动的本地 DSH 服务？',
-      detail: `本地服务地址：${ownedDsh.url}\n选择「保持服务运行」后，服务继续在后台运行，下次启动可直接嗅探连接。`,
-      buttons: ['同时关闭服务', '保持服务运行', '取消退出'],
-      defaultId: 0,
-      cancelId: 2,
-      noLink: true,
-    };
-    const parent = shellWindow && shellWindow.isVisible() ? shellWindow : null;
-    void (parent
-      ? dialog.showMessageBox(parent, options)
-      : dialog.showMessageBox(options)
-    ).then((r) => {
-      quitDialogOpen = false;
-      if (r.response === 2) {
+    void promptQuitDecision('quit').then((decision) => {
+      if (decision === null || decision === 'cancel') {
         // 取消退出：恢复常驻状态，窗口继续可用
         quitDecision = null;
         isQuitting = false;
         return;
       }
-      quitDecision = r.response === 0 ? 'stop' : 'keep';
+      quitDecision = decision;
       app.quit();
     });
     return;

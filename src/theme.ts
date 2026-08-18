@@ -2,8 +2,9 @@ import { nativeTheme } from 'electron';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { parseThemePreferenceJson, parseThemePreferenceYaml, type ThemePreference } from './theme-prefs';
 
-export type ThemePreference = 'light' | 'dark' | 'system';
+export type { ThemePreference } from './theme-prefs';
 
 // DSH 的 home：$DSH_HOME 或标准 ~/.dsh（DSH_HOME 环境变量对 GUI 进程可能不可见）。
 function dshHomePath(): string | null {
@@ -13,7 +14,7 @@ function dshHomePath(): string | null {
 }
 
 // 从 DSH 的 settings.yaml 读取 ui-theme.preference（default: system）。
-// 与 dsh-client-ui-theme 的 theme-settings 保持一致。
+// 解析逻辑在 theme-prefs.ts（纯函数，带单测）。
 export function readDshThemePreference(): ThemePreference {
   const dshHome = dshHomePath();
   if (!dshHome) return 'system';
@@ -23,20 +24,10 @@ export function readDshThemePreference(): ThemePreference {
     if (!fs.existsSync(p)) continue;
     try {
       const raw = fs.readFileSync(p, 'utf-8');
-      if (name.endsWith('.json')) {
-        const parsed = JSON.parse(raw) as { 'ui-theme'?: { preference?: string } };
-        const v = parsed['ui-theme']?.preference;
-        if (v === 'light' || v === 'dark' || v === 'system') return v;
-      } else {
-        // YAML：优先匹配 ui-theme 段下的 preference（避免误读其他插件的同名键），
-        // 找不到时回退到文件中首个 preference 匹配。
-        const section = raw.match(/^ui-theme\s*:\s*([\s\S]*?)(?=^\S|\z)/m);
-        const scoped = section ? section[1] : raw;
-        const m = scoped.match(/^\s*preference\s*:\s*["']?(light|dark|system)["']?/m);
-        if (m) return m[1].toLowerCase() as ThemePreference;
-        const fallback = raw.match(/preference\s*:\s*["']?(light|dark|system)["']?/i);
-        if (fallback) return fallback[1].toLowerCase() as ThemePreference;
-      }
+      const pref = name.endsWith('.json')
+        ? parseThemePreferenceJson(raw)
+        : parseThemePreferenceYaml(raw);
+      if (pref) return pref;
     } catch {
       /* 解析失败按 system 处理 */
     }
