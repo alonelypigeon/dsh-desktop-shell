@@ -1,11 +1,15 @@
-# 发布 CI 模板：打 tag 时构建三平台产物并上传到 GitHub Release。
+# 发布 CI：打 tag 时构建三平台产物并上传到 GitHub Release。
 # 用法（推送到 GitHub 后）：
 #   1. 把下方 owner/repo 填进 electron-builder.yml 的 publish.github（或用本文件的 env）。
 #   2. 配置 secrets：GH_TOKEN（或 GITHUB_TOKEN 自动可用，但发布到 Release 需
 #      `permissions: contents: write`，私有仓库还需带 token 的 PAT）。
 #   3. macOS 签名/公证：设置 APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
 #      APPLE_TEAM_ID，并开启 CSC_LINK/CSC_KEY_PASSWORD（或暂不签名发布）。
-#   4. git tag v0.1.0 && git push origin v0.1.0
+#   4. git tag v0.5.1 && git push origin v0.5.1
+#
+# 注意 job 顺序：electron-builder --publish always 在 release 不存在时会创建它，
+# 三个平台并行跑会竞争创建、产生重复 Release（v0.5.0 事故）。因此 Windows 先行
+# 创建 Release（含 latest.yml），macOS/Linux 依赖它完成后再附加各自的产物。
 name: release
 
 on:
@@ -17,12 +21,37 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build & package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win --publish always
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: release/*.{exe,yml,blockmap}
+          if-no-files-found: ignore
+
+  build-macos:
+    needs: build-windows
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -46,11 +75,40 @@ jobs:
           # APPLE_ID: ${{ secrets.APPLE_ID }}
           # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder --publish always
+        run: npx electron-builder --mac --publish always
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.os }}
-          path: release/*.{exe,yml,blockmap,dmg,zip,AppImage,deb}
+          name: dist-macos
+          path: release/*.{dmg,yml,blockmap,zip}
+          if-no-files-found: ignore
+
+  build-linux:
+    needs: build-windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build & package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --linux --publish always
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: release/*.{AppImage,deb,yml}
           if-no-files-found: ignore

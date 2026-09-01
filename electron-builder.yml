@@ -19,6 +19,9 @@ publish:
   repo: dsh-desktop-shell
   # 测试期发布均为 pre-release（正式版发布时改为 release）。
   releaseType: prerelease
+  # 分阶段灰度（可选保险丝）：取消注释后该构建的更新只推给指定比例的用户，
+  # 也可在发布后手动编辑 Release 里的 latest*.yml 加 `stagingPercentage: 10`。
+  # stagingPercentage: 10
 
 files:
   - dist/**/*

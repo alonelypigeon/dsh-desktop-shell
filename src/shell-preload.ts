@@ -3,6 +3,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { TitlebarMenuName } from './titlebar-menus';
 import type { ShortcutAction, ShortcutBindings, ShortcutConflict, ShortcutMeta } from './shortcuts';
+import type { PaletteEntry } from './palette';
+import type { SavedConnection, DndSchedule } from './shell-state';
 
 /** 主进程推送的快捷键面板状态（结构见 shortcuts.ts）。 */
 export interface ShortcutsStatePayload {
@@ -34,6 +36,10 @@ contextBridge.exposeInMainWorld('shellWindow', {
       cb(v),
     );
   },
+  // 连接阶段变化（'connected' 正常 / 'reconnecting' 断线重连中）
+  onPhaseChange: (cb: (phase: 'connected' | 'reconnecting') => void): void => {
+    ipcRenderer.on('shell:phase-changed', (_e, v: 'connected' | 'reconnecting') => cb(v));
+  },
   // 断开连接（本地服务保持运行）
   disconnect: (): void => ipcRenderer.send('shell:disconnect'),
   // 断开连接并关闭（若为本应用启动的本地服务则一并停止）
@@ -58,6 +64,23 @@ contextBridge.exposeInMainWorld('shellWindow', {
     close: (): void => ipcRenderer.send('shell:settings-close'),
     onVisible: (cb: (visible: boolean) => void): void => {
       ipcRenderer.on('shell:settings-visible', (_e, v: boolean) => cb(v));
+    },
+    getDndSchedule: (): Promise<DndSchedule | null> => ipcRenderer.invoke('shell:dnd-schedule-get'),
+    setDndSchedule: (schedule: DndSchedule): void => ipcRenderer.send('shell:dnd-schedule-set', schedule),
+  },
+  // 勿扰模式（静默系统通知，徽章保留）
+  onDndChange: (cb: (on: boolean) => void): void => {
+    ipcRenderer.on('shell:dnd-changed', (_e, v: boolean) => cb(v));
+  },
+  // 命令面板（Ctrl+K；动作清单由主进程按当前状态推送，执行只回传清单里的 id）
+  palette: {
+    run: (id: string): void => ipcRenderer.send('shell:palette-run', id),
+    close: (): void => ipcRenderer.send('shell:palette-close'),
+    onVisible: (cb: (visible: boolean) => void): void => {
+      ipcRenderer.on('shell:palette-visible', (_e, v: boolean) => cb(v));
+    },
+    onModel: (cb: (entries: PaletteEntry[]) => void): void => {
+      ipcRenderer.on('shell:palette-model', (_e, v: PaletteEntry[]) => cb(v));
     },
   },
   // 快捷键绑定（录制判定与冲突检查在主进程，渲染层只发原始按键事件）
@@ -95,6 +118,16 @@ contextBridge.exposeInMainWorld('shellWindow', {
     clearRecent: (): void => ipcRenderer.send('login:clear-recent'),
     onRecentResult: (cb: (list: string[]) => void): void => {
       ipcRenderer.on('login:recent-result', (_e, v: string[]) => cb(v));
+    },
+    // 命名连接配置库（A1）：请求 / 删除 / 重命名
+    connections: {
+      request: (): void => ipcRenderer.send('login:connections'),
+      remove: (id: string): void => ipcRenderer.send('login:remove-connection', id),
+      rename: (id: string, name: string): void => ipcRenderer.send('login:rename-connection', id, name),
+      pin: (id: string): void => ipcRenderer.send('login:pin-connection', id),
+      onResult: (cb: (list: SavedConnection[]) => void): void => {
+        ipcRenderer.on('login:connections-result', (_e, v: SavedConnection[]) => cb(v));
+      },
     },
     // 结果/进度订阅
     onSniffResult: (cb: (list: { url: string }[]) => void): void => {

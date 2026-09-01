@@ -131,16 +131,28 @@ export function buildServerMenuItems(
 export interface MoreMenuState {
   /** 当前内容视图缩放（缩放子菜单标题显示百分比）。 */
   zoomFactor?: number;
-  /** 当前快捷键绑定（缩放子菜单右侧展示组合键；未传不展示）。 */
+  /** 当前快捷键绑定（命令面板 / 缩放子菜单右侧展示组合键；未传不展示）。 */
   accelerators?: MenuAccelerators;
+  /** 勿扰模式是否开启（checkbox 勾选态）。 */
+  dnd?: boolean;
 }
 
 export interface MoreMenuHandlers {
+  /** 呼出/收起命令面板（Ctrl+K，可重绑）。 */
+  palette: () => void;
   zoomIn: () => void;
   zoomOut: () => void;
   zoomReset: () => void;
   /** 打开快捷键设置面板。 */
   shortcuts: () => void;
+  /** 切换勿扰模式（静默系统通知，徽章保留）。 */
+  toggleDnd: () => void;
+  /** 导出命名连接配置（JSON，A4）。 */
+  exportConnections: () => void;
+  /** 导入命名连接配置（JSON，A4）。 */
+  importConnections: () => void;
+  /** 打开诊断信息与日志导出。 */
+  showDiagnostics: () => void;
   checkUpdates: () => void;
   about: () => void;
   quit: () => void;
@@ -151,9 +163,19 @@ export function buildMoreMenuItems(
   handlers: MoreMenuHandlers,
 ): MenuItemConstructorOptions[] {
   return [
+    { label: '命令面板…', accelerator: acc(state.accelerators?.palette), click: handlers.palette },
     { label: '检查更新…', click: handlers.checkUpdates },
     { label: '关于 DeepSeek Harness Shell…', click: handlers.about },
     { label: '快捷键设置…', click: handlers.shortcuts },
+    {
+      type: 'checkbox',
+      label: '勿扰模式（静默通知）',
+      checked: state.dnd === true,
+      click: handlers.toggleDnd,
+    },
+    { label: '导出连接…', click: handlers.exportConnections },
+    { label: '导入连接…', click: handlers.importConnections },
+    { label: '诊断日志…', click: handlers.showDiagnostics },
     { type: 'separator' },
     {
       label: `缩放 ${zoomPercent(state.zoomFactor ?? ZOOM_DEFAULT)}%`,

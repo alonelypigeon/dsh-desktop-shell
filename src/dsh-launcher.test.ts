@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeRequestedPort } from './dsh-launcher';
+import { normalizeRequestedPort, buildDshWebArgs } from './dsh-launcher';
 
 describe('normalizeRequestedPort', () => {
   it('未提供端口 → 0（随机端口）', () => {
@@ -40,5 +40,13 @@ describe('normalizeRequestedPort', () => {
     expect(normalizeRequestedPort(true)).toBeNull();
     expect(normalizeRequestedPort({})).toBeNull();
     expect(normalizeRequestedPort([])).toBeNull();
+  });
+});
+
+describe('buildDshWebArgs', () => {
+  it('包含 --no-open，避免 dsh web 默认打开系统浏览器', () => {
+    expect(buildDshWebArgs(0)).toEqual(['web', '--host', '127.0.0.1', '--port', '0', '--no-open']);
+    expect(buildDshWebArgs(8080)).toContain('--no-open');
+    expect(buildDshWebArgs(8080)).toContain('--port');
   });
 });

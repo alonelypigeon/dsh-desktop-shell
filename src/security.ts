@@ -8,28 +8,19 @@ const ALLOWED_PROTOCOLS = new Set(['http:', 'https:']);
 // 误判为「偏离源」拦截并甩给系统浏览器。
 const installedGuards = new WeakMap<WebContents, (e: Electron.Event, url: string) => void>();
 
-// DSH 页面用不到的敏感权限一律拒绝；剪贴板/通知/全屏等常规能力放行，
-// 避免远程页面借此调用本机摄像头、麦克风、定位或外设。
-const DENIED_PERMISSIONS = new Set([
-  'camera',
-  'microphone',
-  'media', // getUserMedia 的旧式聚合权限名
-  'geolocation',
-  'midi',
-  'midiSysex',
-  'hid',
-  'serial',
-  'usb',
-  'bluetooth',
-  'display-capture',
-  'keyboardLock',
-  'window-management',
-  'openExternal',
+// 权限白名单：仅放行常规无害能力，其余（含 Electron 未来新增的敏感权限）
+// 一律默认拒绝——比黑名单更安全，不会随权限名演进而出现漏网。
+const ALLOWED_PERMISSIONS = new Set([
+  'clipboard-read',
+  'clipboard-sanitized-write',
+  'fullscreen',
+  'notifications',
+  'pointerLock',
 ]);
 
 // 外链安全策略：只允许 http/https 交给系统浏览器，其余协议
 //（file:、smb:、tel:、自定义 scheme 等）一律丢弃并记录，防止本地资源被系统侧打开。
-function openExternalSafe(rawUrl: string): void {
+export function openExternalSafe(rawUrl: string): void {
   let u: URL;
   try {
     u = new URL(rawUrl);
@@ -70,10 +61,10 @@ export function attachSecurity(contents: WebContents, dshOrigin: string): void {
   installedGuards.set(contents, guard);
   contents.on('will-navigate', guard);
 
-  // 权限策略：拒绝敏感设备权限（见 DENIED_PERMISSIONS）。
+  // 权限策略：白名单之外全部拒绝（摄像头/麦克风/定位/外设等，见 ALLOWED_PERMISSIONS）。
   const { session } = contents;
   session.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(!DENIED_PERMISSIONS.has(permission));
+    callback(ALLOWED_PERMISSIONS.has(permission));
   });
-  session.setPermissionCheckHandler((_wc, permission) => !DENIED_PERMISSIONS.has(permission));
+  session.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.has(permission));
 }

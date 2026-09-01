@@ -27,6 +27,10 @@ export function validateUrl(raw: string): string {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') {
     throw new Error(`不支持的协议：${u.protocol}（仅支持 http / https）`);
   }
+  // 剥离内嵌凭据（user:pass@host）：该 URL 会明文写入 shell-state.json
+  //（最近连接列表、托盘提示）与 ~/.dsh 共享配置，不应携带密码。
+  u.username = '';
+  u.password = '';
   return u.toString();
 }
 

@@ -20,6 +20,12 @@ export interface ShellUiState {
   findBarVisible?: boolean;
   /** 快捷键设置面板是否打开（打开期间 DSH 内容视图临时摘下）。 */
   settingsVisible?: boolean;
+  /** 命令面板是否打开（打开期间 DSH 内容视图临时摘下）。 */
+  paletteVisible?: boolean;
+  /** 勿扰模式是否开启（标题栏指示 + 通知门控）。 */
+  dnd?: boolean;
+  /** 连接阶段（断线重连中状态点变黄）。 */
+  phase?: 'connected' | 'reconnecting';
 }
 
 export function pushShellUiState(wc: WebContents, s: ShellUiState): void {
@@ -34,4 +40,7 @@ export function pushShellUiState(wc: WebContents, s: ShellUiState): void {
   });
   wc.send('shell:find-visible', s.findBarVisible === true);
   wc.send('shell:settings-visible', s.settingsVisible === true);
+  wc.send('shell:palette-visible', s.paletteVisible === true);
+  wc.send('shell:dnd-changed', s.dnd === true);
+  if (s.phase) wc.send('shell:phase-changed', s.phase);
 }

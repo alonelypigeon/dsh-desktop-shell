@@ -4,6 +4,150 @@
 （dsh-plugin-desktop-control / dsh-plugin-balance-panel / dsh-plugin-session-outline）
 已拆分为独立仓库，各自维护版本与变更记录。
 
+## [0.8.0] - 2026-09-01
+
+### 新增
+
+- **远程通知通道（`notifyRequest`）**：cordis 插件（如 `dsh-plugin-desktop-control`
+  的 `/desktop notify`）把通知请求写进共享配置，外壳轮询/watch 到后弹系统通知
+  并清空请求。与 autoLaunch / updateRequest / serviceStopRequest 同一通信模式
+  （DSH 进程内无法直接调 Electron API）。细节：
+  - 请求一次弹一条：按 `id` 去重（`notify-queue.ts` 纯函数状态机，带单测）；
+    外壳启动时快速清掉插件在启动前写入的请求（瞬态事件不补弹）。
+  - 复用勿扰约束（定时勿扰期间静默丢弃）与 `Notification.isSupported` 守卫；
+    点击通知聚焦窗口；失败仅 console.warn（通知尽力而为）。
+  - 共享配置 `loadSharedConfig` 对 `notifyRequest` 做字段校验（id/title/body
+    字符串、silent 仅接受 true），损坏字段视为无请求。
+- 安全加固（评审发现，行为不变）：`readDshThemePreference` 拒绝**相对路径**
+  `DSH_HOME`（原来直接使用，相对路径会随进程 cwd 漂移，读取无稳定语义），
+  DSH 配置文件名明确为受控枚举并在读取前校验解析结果落在 home 边界内；
+  `killTree` 校验 pid 数值合法性并显式 `shell: false` 调用 taskkill。
+
+## [0.7.0] - 2026-08-24
+
+### 修复
+
+- **GUI 启动本地 DSH 服务不再弹系统浏览器**：上游 `dsh web` 更新后默认会在
+  本机默认浏览器中打开 Web UI。桌面外壳已经用独立内容视图承载页面，因此
+  `dsh-launcher` 启动参数显式追加 `--no-open`，避免每次通过 GUI 启动服务时
+  额外弹出浏览器标签。
+
+### 新增
+
+- **命名连接配置库（A1）+ 导入/导出（A4）**：`shell-state.json` 新增
+  `connections` 结构化字段（`{ id, name, url, kind, lastUsed }`），加载时自动
+  从旧版扁平 `recentServers` 迁移；`buildDshWebArgs` 与连接管理纯函数
+  （`makeConnectionId` / `normalizeSavedConnection` / `migrateConnections` /
+  `mergeSavedConnection` / `removeSavedConnection` / `renameSavedConnection` /
+  `exportConnections` / `parseConnectionsImport`）均带单测。「⋯ → 更多」菜单
+  新增「导出连接…」和「导入连接…」，导入后自动合并进配置库并刷新最近连接列表。
+- **内容视图独立 session（S1）**：主内容视图统一使用
+  `partition: 'persist:dsh'`，远程页面 cookie/storage 与外壳默认 session 隔离，
+  为后续多账号/按连接代理打下安全基础。
+- **命名连接配置库 UI（A1 补全）**：login 界面新增「已保存连接」区，显示
+  连接名称与地址，支持点击连接、置顶、重命名、删除；主进程新增对应 IPC。
+- **诊断与日志导出（D3）**：「⋯ → 更多」新增「诊断日志…」，汇总应用版本、
+  连接状态、本地服务状态、已保存连接数以及最近 500 行 dsh 启动日志，并支持
+  导出为 `.log` 文件；`dsh-launcher` 支持 `onLog` 回调接入环形缓冲。
+- **勿扰时段（B3）**：设置面板新增「勿扰时段」，可启用定时静默并配置开始/结束
+  时间（支持跨天，如 22:00–07:00）；定时勿扰期间系统通知静默，未读徽章保留。
+- **通知聚合（B4）**：未读计数在短时间内多次增长时合并为一条通知，避免连续
+  弹“1、2、3…”的轰炸；窗口重新聚焦后自动取消待发送通知。
+
+- **调研落地**：对应 [`docs/competitive-research-2026-08.md`](docs/competitive-research-2026-08.md)
+  中 Beekeeper Studio 连接管理 UX、WebCatalog Spaces 多账号并存、以及
+  Beekeeper 缺失导出能力被用户长期抱怨（issue #1645）的需求证据。
+
+
+## [0.6.0] - 2026-08-19
+
+### 新增
+
+- **命令面板（Ctrl+K）**：键盘优先的快速操作入口——切换到最近连接、启动/停止
+  本地服务、断开/切换服务器、重载/强刷/页内查找、缩放三档（显示当前百分比）、
+  置顶开关、检查更新、快捷键设置、勿扰开关、退出。动作清单由主进程按当前
+  状态构建（纯函数 `palette.ts`，连接相关动作未连接时自动隐藏），渲染层本地
+  模糊过滤（子串 + 子序列）+ ↑↓/Enter/Esc 键盘导航；执行只回传清单里的 id，
+  主进程校验后才分发——渲染层无法注入任意命令。面板打开期间 DSH 内容视图
+  临时摘下（与快捷键设置面板同机制、互斥），关闭原样挂回不重载。快捷键可
+  在设置面板重绑（进动作白名单，默认 `Ctrl+K`）；「⋯」菜单新增入口。
+- **代理状态通知 + 未读角标**：零注入前提下监听页面标题的 "(n)" 前缀
+  （`page-title-updated`，解析纯化为 `title-watcher.ts`）——窗口隐藏/最小化
+  且计数增加时弹系统通知「DSH 需要你的注意」，点击聚焦窗口；同时三平台
+  显示未读角标：Windows 任务栏覆盖图标（`setOverlayIcon`，预渲染数字角标图
+  `build/badges/`，`scripts/generate-badges.mjs` 纯 Node 生成）、macOS
+  Dock 徽标 + 托盘数字（`setBadgeCount` / `tray.setTitle`）、Linux 桌面
+  角标。窗口聚焦即视为已读自动清零；断开/切换连接时清空。
+- **勿扰模式**：托盘菜单与「⋯」菜单 checkbox 一键切换（也可从命令面板），
+  开启后系统通知静默（未读角标保留），标题栏地址旁显示「勿扰」指示；状态
+  持久化在 `shell-state.json`，重启保持。
+- **更新体验三件套**：① 更新对话框展示 release notes（GitHub Release 描述
+  剥成纯文本，纯函数 `release-notes.ts`），并支持勾选「下载完成后退出时
+  自动安装」（勾选后跳过「立即重启」打扰）；② `electron-builder.yml` 预留
+  `stagingPercentage` 灰度注释（坏更新保险丝）；③ Windows portable 版检测
+  到无法 in-place 更新时，「检查更新」改为引导打开 Releases 页面手动下载
+  （整套 updater 对 portable 跳过）。
+
+### 文档
+
+- 新增 [`docs/competitive-research-2026-08.md`](docs/competitive-research-2026-08.md)：
+  竞品调研存档——四类同类产品（工作台聚合器 / 托盘优先应用 / AI 编码代理
+  GUI / Electron 壳工程实践）概览 + 20 项功能创意（A–E 五主题）+ Top 5 排名。
+- 新增 [`docs/roadmap.md`](docs/roadmap.md)：版本路线图——v0.6 感知与效率
+  （代理状态通知、托盘/任务栏徽章、勿扰模式、Ctrl+K 命令面板、更新体验
+  三件套）→ v0.7 多连接与监控（命名连接配置库、健康/诊断
+  面板、内容视图独立 session）→ v0.8 体验打磨 → v1.0 并行多窗口会话；
+  每项含实现要点（对应模块）与验收标准。
+- README 增加路线图入口与 docs/ 目录说明；「断开连接并关闭服务器」
+  （PID 确认 + 指纹复核）与权限白名单两处描述与实现对齐。
+
+### 安全加固
+
+- **「断开连接并关闭服务器」增加进程确认**：该功能按端口定位并结束本机
+  进程树，此前一键直达——手动连接到 `127.0.0.1:<任意端口>` 后点一下就会
+  杀掉恰好监听该端口的无关本机服务（开发服务器 / 数据库等）。现在先定位
+  进程、在确认弹窗中**列出将被结束的 PID**，并尽力做一次 DSH 指纹校验
+  （index 特征 + 官方鲸鱼 favicon，与本地嗅探同标准，抽出
+  `sniffer.isDshInstance`）；校验未通过（如页面需要登录）时改用强警告
+  文案且默认按钮为「取消」。`server-stop.ts` 拆为「定位
+  （`resolveExternalServerTarget`）/ 终止（`terminateExternalServer`）」
+  两阶段，组合入口保留给 e2e 脚本。
+- **启动自动连接补确认弹窗**：`--url` / `DSH_URL` / 共享配置里的非回环
+  地址此前会绕过「连接远程服务器」确认直接加载（共享配置文件是本机任意
+  进程可写的 cordis 通道，被篡改后可在启动时静默加载钓鱼页）。现在与手动
+  连接 / 深链走同一条 `confirmRemoteConnect` 确认路径，回环地址保持免打扰。
+- **更新源仅接受 https**：`DSH_UPDATE_URL` 环境变量此前可把更新源指向
+  任意 generic URL——安装包未做代码签名，http 源可被中间人替换后诱导
+  「一键安装」实现代码执行。现在非 https 的覆盖直接忽略并告警；同时
+  删除已过时的 example.com 占位符检测（发布源已固定为 GitHub Releases）。
+- **URL 内嵌凭据剥离**：`validateUrl` 现在剥掉 `user:pass@host` 形式的
+  内嵌凭据——该 URL 会明文写入 `shell-state.json`（最近连接列表 / 托盘
+  提示）与 `~/.dsh/desktop-shell.json` 共享配置。
+- **重定向后地址如实显示**：服务端 3xx 重定向不经过 `will-navigate`
+  守卫，标题栏与托盘此前一直显示连接时的地址（「标签写着 A、页面实为 B」
+  的钓鱼误导）。现在跟踪 `did-navigate` / `did-navigate-in-page` 的实际
+  地址用于展示，主源变化时记录告警日志。
+- **纵深防御**：shell 窗口自身补上「弹窗一律拒绝 + 仅允许 file: 导航」
+  守卫；权限策略由黑名单改为**白名单**（仅剪贴板 / 通知 / 全屏 /
+  pointerLock，其余含未来新增权限默认拒绝），并移除失效的
+  `openExternal` 权限名；「在浏览器中打开」改走 `openExternalSafe`；
+  标题栏菜单锚点坐标补充 NaN / Infinity 校验。
+- **状态文件权限收紧（POSIX）**：`shell-state.json`（最近连接地址等）与
+  `~/.dsh/desktop-shell.json` 共享配置写入后 `chmod 0600`，仅属主可读写。
+- **发布 CI 修复重复 Release**：三个平台的 matrix job 并行执行
+  `--publish always` 会竞争创建 Release，v0.5.0 因此被创建了两次（其中
+  一条只挂了部分 mac 产物）。改为 Windows 先行创建 Release（含
+  latest.yml），macOS / Linux `needs` 依赖其后附加产物。
+
+### 新增
+
+- **连接状态可视化 + 断线/恢复系统通知**：断线自动重连原本是静默的——
+  DSH 重启期间用户只看到页面转圈。现在服务断开时（`did-fail-load`）
+  标题栏连接区状态点变黄并弹系统通知「连接已断开，正在自动重连…」，
+  服务恢复自动重载页面后状态点回绿并通知「已恢复连接」（通知仅在
+  已连接过的场景触发、断线期间去重；页面 reload 后状态点颜色经
+  `shell-ui-state` 自愈推送保持）。状态点与「重新加载」等操作互不影响。
+
 ## [0.5.0] - 2026-08-18
 
 ### 新增

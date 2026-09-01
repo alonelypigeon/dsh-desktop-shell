@@ -32,6 +32,13 @@
     connEl.hidden = !s.connected;
     connUrlEl.textContent = s.url || '';
   });
+  // 断线重连中：状态点变黄；恢复后回绿（class 由 CSS 定义）
+  window.shellWindow.onPhaseChange(function (phase) {
+    connUrlEl.classList.toggle('reconnecting', phase === 'reconnecting');
+  });
+  // 勿扰指示（通知静默但徽章保留）
+  var dndEl = document.getElementById('conn-dnd');
+  window.shellWindow.onDndChange(function (on) { dndEl.hidden = !on; });
   // 菜单按钮通用绑定：点击 → 把按钮锚点发给主进程弹原生菜单
   function bindMenuButton(btn, name) {
     btn.addEventListener('click', function () {
@@ -195,9 +202,34 @@
     shortcutsState = s;
     renderShortcuts();
   });
-  window.shellWindow.settings.onVisible(function (v) {
+  // B3: dnd schedule controls
+  var dndEnabledEl = document.getElementById('dnd-schedule-enabled');
+  var dndStartEl = document.getElementById('dnd-schedule-start');
+  var dndEndEl = document.getElementById('dnd-schedule-end');
+  var dndStatusEl = document.getElementById('dnd-schedule-status');
+  function loadDndSchedule() {
+    window.shellWindow.settings.getDndSchedule().then(function (s) {
+      dndEnabledEl.checked = !!(s && s.enabled);
+      dndStartEl.value = (s && s.start) || '22:00';
+      dndEndEl.value = (s && s.end) || '07:00';
+      dndStatusEl.textContent = s && s.enabled ? '定时勿扰已启用（' + s.start + ' - ' + s.end + '）' : '未启用定时勿扰';
+    });
+  }
+  function saveDndSchedule() {
+    window.shellWindow.settings.setDndSchedule({
+      enabled: dndEnabledEl.checked,
+      start: dndStartEl.value || '22:00',
+      end: dndEndEl.value || '07:00',
+    });
+    dndStatusEl.textContent = dndEnabledEl.checked ? '定时勿扰已启用（' + (dndStartEl.value || '22:00') + ' - ' + (dndEndEl.value || '07:00') + '）' : '未启用定时勿扰';
+  }
+  dndEnabledEl.addEventListener('change', saveDndSchedule);
+  dndStartEl.addEventListener('change', saveDndSchedule);
+  dndEndEl.addEventListener('change', saveDndSchedule);
+
+    window.shellWindow.settings.onVisible(function (v) {
     settingsEl.hidden = !v;
-    if (v) window.shellWindow.shortcuts.get();
+    if (v) { window.shellWindow.shortcuts.get(); loadDndSchedule(); }
     else stopRecording();
   });
   document.getElementById('settings-close').addEventListener('click', function () {
@@ -242,6 +274,134 @@
         }
         if (r && r.error) els.errEl.textContent = r.error; // 无效/冲突：留在录制态可重试
       });
+  }, true);
+
+  // —— 命令面板（Ctrl+K；清单由主进程推送，执行只回传清单里的 id） ——
+  var paletteEl = document.getElementById('palette');
+  var paletteInput = document.getElementById('palette-input');
+  var paletteList = document.getElementById('palette-list');
+  var paletteEntries = []; // 主进程下发的动作快照
+  var paletteFiltered = []; // 过滤后的可见项
+  var paletteItemEls = [];  // 与 paletteFiltered 对应的 DOM
+  var paletteActive = 0;
+
+  // 模糊匹配：子串优先，退化为按序子序列（"mlad" 可命中「命令面板」拼音首字母类输入不做，
+  // 只做字符级匹配，保持无依赖、可预期）
+  function paletteMatch(query, text) {
+    var q = query.trim().toLowerCase();
+    if (!q) return true;
+    var t = text.toLowerCase();
+    if (t.indexOf(q) !== -1) return true;
+    var i = 0;
+    for (var j = 0; j < t.length && i < q.length; j++) {
+      if (t.charAt(j) === q.charAt(i)) i++;
+    }
+    return i === q.length;
+  }
+
+  function paletteMarkActive() {
+    paletteItemEls.forEach(function (el, i) {
+      el.classList.toggle('active', i === paletteActive);
+    });
+    var el = paletteItemEls[paletteActive];
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }
+
+  function paletteRender() {
+    var query = paletteInput.value;
+    paletteFiltered = paletteEntries.filter(function (en) {
+      return paletteMatch(query, en.label + ' ' + (en.hint || ''));
+    });
+    if (paletteActive >= paletteFiltered.length) paletteActive = 0;
+    paletteList.textContent = '';
+    paletteItemEls = [];
+    var lastGroup = null;
+    paletteFiltered.forEach(function (en, idx) {
+      if (en.group !== lastGroup) {
+        var head = document.createElement('div');
+        head.className = 'palette-group';
+        head.textContent = en.group;
+        paletteList.appendChild(head);
+        lastGroup = en.group;
+      }
+      var item = document.createElement('div');
+      item.className = 'palette-item';
+      item.setAttribute('role', 'option');
+      var label = document.createElement('span');
+      label.className = 'palette-label';
+      label.textContent = en.label;
+      item.appendChild(label);
+      if (en.hint) {
+        var hint = document.createElement('span');
+        hint.className = 'palette-hint';
+        hint.textContent = en.hint;
+        item.appendChild(hint);
+      }
+      item.addEventListener('click', function () { window.shellWindow.palette.run(en.id); });
+      item.addEventListener('mousemove', function () {
+        if (paletteActive !== idx) {
+          paletteActive = idx;
+          paletteMarkActive();
+        }
+      });
+      paletteList.appendChild(item);
+      paletteItemEls.push(item);
+    });
+    if (paletteFiltered.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'palette-empty';
+      empty.textContent = '没有匹配的命令';
+      paletteList.appendChild(empty);
+    }
+    paletteMarkActive();
+  }
+
+  window.shellWindow.palette.onModel(function (model) {
+    paletteEntries = Array.isArray(model) ? model : [];
+    paletteRender();
+  });
+  window.shellWindow.palette.onVisible(function (v) {
+    paletteEl.hidden = !v;
+    if (v) {
+      paletteInput.value = '';
+      paletteActive = 0;
+      paletteRender();
+      paletteInput.focus();
+    }
+  });
+  paletteInput.addEventListener('input', function () {
+    paletteActive = 0;
+    paletteRender();
+  });
+  paletteInput.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (paletteFiltered.length > 0) {
+        paletteActive = (paletteActive + 1) % paletteFiltered.length;
+        paletteMarkActive();
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (paletteFiltered.length > 0) {
+        paletteActive = (paletteActive - 1 + paletteFiltered.length) % paletteFiltered.length;
+        paletteMarkActive();
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      var en = paletteFiltered[paletteActive];
+      if (en) window.shellWindow.palette.run(en.id);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      window.shellWindow.palette.close();
+    }
+  });
+  // 面板焦点在 shell 页面（内容视图已摘下），再按 Ctrl+K 直接关闭
+  document.addEventListener('keydown', function (e) {
+    if (paletteEl.hidden) return;
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      window.shellWindow.palette.close();
+    }
   }, true);
 
   // —— login 交互 ——
@@ -336,6 +496,83 @@
   window.shellWindow.login.onRecentResult(renderRecent);
   window.shellWindow.login.requestRecent();
 
+  // —— 命名连接配置库（A1）：显示名称+地址，支持删除与重命名 ——
+  var connectionsEl = document.getElementById('connections');
+  var currentConnections = [];
+  function renderConnections(list) {
+    currentConnections = Array.isArray(list) ? list : [];
+    connectionsEl.textContent = '';
+    connectionsEl.hidden = currentConnections.length === 0;
+    if (currentConnections.length === 0) return;
+    var head = document.createElement('div');
+    head.className = 'recent-head';
+    var title = document.createElement('span');
+    title.className = 'recent-title';
+    title.textContent = '已保存连接（点击连接）';
+    head.appendChild(title);
+    connectionsEl.appendChild(head);
+    currentConnections.forEach(function (conn) {
+      var row = document.createElement('div');
+      row.className = 'recent-row';
+      var b = document.createElement('button');
+      b.className = 'inst';
+      b.title = '点击连接 ' + conn.url;
+      var nameEl = document.createElement('span');
+      nameEl.className = 'conn-name';
+      nameEl.textContent = conn.name || conn.url;
+      var urlEl = document.createElement('span');
+      urlEl.className = 'conn-url';
+      urlEl.textContent = conn.url;
+      b.appendChild(nameEl);
+      b.appendChild(urlEl);
+      b.addEventListener('click', function () { window.shellWindow.login.joinRemote(conn.url); });
+      row.appendChild(b);
+      var pinBtn = document.createElement('button');
+      pinBtn.className = 'icon-btn';
+      pinBtn.textContent = '★';
+      pinBtn.title = '置顶';
+      pinBtn.setAttribute('aria-label', '置顶 ' + (conn.name || conn.url));
+      pinBtn.addEventListener('click', function () { window.shellWindow.login.connections.pin(conn.id); });
+      row.appendChild(pinBtn);
+      var renameBtn = document.createElement('button');
+      renameBtn.className = 'icon-btn';
+      renameBtn.textContent = '✎';
+      renameBtn.title = '重命名';
+      renameBtn.setAttribute('aria-label', '重命名 ' + (conn.name || conn.url));
+      renameBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'conn-rename';
+        input.value = conn.name || conn.url;
+        nameEl.replaceWith(input);
+        input.focus();
+        input.select();
+        function commit() {
+          var v = input.value.trim();
+          if (v && v !== (conn.name || conn.url)) window.shellWindow.login.connections.rename(conn.id, v);
+          else renderConnections(currentConnections);
+        }
+        input.addEventListener('keydown', function (e2) {
+          if (e2.key === 'Enter') { e2.preventDefault(); commit(); }
+          else if (e2.key === 'Escape') { e2.preventDefault(); renderConnections(currentConnections); }
+        });
+        input.addEventListener('blur', commit);
+      });
+      row.appendChild(renameBtn);
+      var del = document.createElement('button');
+      del.className = 'icon-btn danger';
+      del.textContent = '×';
+      del.title = '删除该连接';
+      del.setAttribute('aria-label', '删除连接 ' + (conn.name || conn.url));
+      del.addEventListener('click', function () { window.shellWindow.login.connections.remove(conn.id); });
+      row.appendChild(del);
+      connectionsEl.appendChild(row);
+    });
+  }
+  window.shellWindow.login.connections.onResult(renderConnections);
+  window.shellWindow.login.connections.request();
+
   cards.addEventListener('change', function () {
     var m = currentMethod();
     cards.querySelectorAll('.card').forEach(function (l) {
@@ -403,6 +640,7 @@
       // 页面重新可见（切换服务器 / 断开连接）时复位表单：连接成功的复位
       // 消息可能在页面隐藏期间被丢弃，按钮会残留「连接中…」禁用态。
       setBusy(false);
+      window.shellWindow.login.connections.request();
       // 嗅探方式马上会收到新结果；其余方式清掉上一次连接留下的旧状态文案
       if (currentMethod() !== 'sniff') setStatus('');
     }

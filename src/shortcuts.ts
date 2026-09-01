@@ -10,6 +10,7 @@
 
 export type ShortcutAction =
   | 'global-toggle-window'
+  | 'palette'
   | 'find'
   | 'reload'
   | 'reload-hard'
@@ -28,6 +29,7 @@ export interface ShortcutMeta {
 // 展示顺序（设置面板分组：全局在前，内容视图按使用频率排列）
 export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
   'global-toggle-window',
+  'palette',
   'find',
   'reload',
   'reload-hard',
@@ -41,6 +43,11 @@ export const SHORTCUT_META: Record<ShortcutAction, ShortcutMeta> = {
     label: '唤起 / 收起窗口',
     description: '全局热键，任何应用下可用',
     scope: 'global',
+  },
+  palette: {
+    label: '命令面板',
+    description: '呼出 / 收起命令面板（快速执行命令与切换连接）',
+    scope: 'content',
   },
   find: {
     label: '页面内查找',
@@ -79,6 +86,7 @@ export type ShortcutBindings = Record<ShortcutAction, string | null>;
 
 export const DEFAULT_SHORTCUTS: ShortcutBindings = {
   'global-toggle-window': 'CommandOrControl+Shift+D',
+  palette: 'CommandOrControl+K',
   find: 'CommandOrControl+F',
   reload: 'CommandOrControl+R',
   'reload-hard': 'CommandOrControl+Shift+R',

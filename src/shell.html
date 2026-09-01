@@ -18,6 +18,7 @@
     </div>
     <div class="conn" id="conn" hidden>
       <span class="conn-url" id="conn-url"></span>
+      <span class="conn-dnd" id="conn-dnd" hidden title="勿扰模式已开启：系统通知静默，未读徽章保留">勿扰</span>
       <button class="tb-btn" id="conn-toggle" title="断开连接">断开连接 ▾</button>
     </div>
     <div class="tb-actions">
@@ -73,6 +74,15 @@
     <button class="find-btn" id="find-close" type="button" title="关闭查找栏（Esc）" aria-label="关闭查找栏">✕</button>
   </div>
 
+  <!-- 命令面板（Ctrl+K 呼出；期间 DSH 内容视图临时让位，同设置面板机制） -->
+  <div class="palette" id="palette" hidden role="dialog" aria-label="命令面板">
+    <div class="palette-card">
+      <input id="palette-input" type="text" spellcheck="false" autocomplete="off"
+        placeholder="输入命令或地址…（↑↓ 选择，Enter 执行，Esc 关闭）" />
+      <div class="palette-list" id="palette-list" role="listbox"></div>
+    </div>
+  </div>
+
   <!-- 快捷键设置面板（「更多 → 快捷键设置…」打开；期间 DSH 内容视图临时让位） -->
   <div class="settings" id="settings" hidden>
     <div class="settings-card">
@@ -85,6 +95,18 @@
         字母 / 数字 / 符号需配合 Ctrl 或 Alt，F 功能键可单独绑定。
       </p>
       <div class="settings-groups" id="settings-groups"></div>
+      <div class="settings-dnd">
+        <div class="settings-group-title">勿扰时段（B3）</div>
+        <label class="dnd-schedule-row">
+          <input type="checkbox" id="dnd-schedule-enabled" />
+          <span>启用定时勿扰</span>
+        </label>
+        <div class="dnd-schedule-row">
+          <label>开始 <input type="time" id="dnd-schedule-start" /></label>
+          <label>结束 <input type="time" id="dnd-schedule-end" /></label>
+        </div>
+        <span class="settings-hint" id="dnd-schedule-status"></span>
+      </div>
       <div class="settings-foot">
         <span class="settings-hint" id="settings-env-hint" hidden
           >全局热键正由 DSH_HOTKEY 环境变量指定；重新绑定或重置后将固定为自定义值</span
@@ -173,6 +195,7 @@
           <input id="local-port" type="text" inputmode="numeric" spellcheck="false" placeholder="随机" />
           <span class="port-hint">留空自动选择随机端口</span>
         </div>
+        <div class="recent" id="connections" hidden></div>
         <div class="recent" id="recent" hidden></div>
         <button id="connect" class="connect">重新嗅探</button>
         <div class="status" id="status"></div>

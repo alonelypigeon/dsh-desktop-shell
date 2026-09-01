@@ -102,6 +102,8 @@ export interface DshLaunchOptions {
   timeoutMs?: number;
   /** 指定监听端口；缺省/0 表示随机端口。 */
   port?: number;
+  /** 诊断日志回调（stdout/stderr 原始分片，供外壳记录到环形缓冲）。 */
+  onLog?: (line: string) => void;
 }
 
 // 校验 GUI 传入的端口输入。返回：
@@ -120,11 +122,18 @@ export function normalizeRequestedPort(raw: unknown): number | null {
   return n;
 }
 
+
+// dsh web now opens the default browser unless --no-open is passed.
+// The desktop shell has its own content view, so suppress that here.
+export function buildDshWebArgs(port: number): string[] {
+  return ['web', '--host', '127.0.0.1', '--port', String(port), '--no-open'];
+}
+
 // 自动启动一个本地 dsh web 实例并嗅探其就绪 URL。
 // 默认随机回环端口；指定 port 时尝试监听该端口（被占用会启动失败并带上 stderr 提示）。
 // 返回 null 表示无法启动（找不到 dsh、启动失败或超时）。
 export async function launchLocalDsh(options: DshLaunchOptions = {}): Promise<DshService | null> {
-  const { onProgress, timeoutMs = 30000, port = 0 } = options;
+  const { onProgress, timeoutMs = 30000, port = 0, onLog } = options;
 
   const dshBin = resolveDshBin();
   if (!dshBin) {
@@ -142,7 +151,7 @@ export async function launchLocalDsh(options: DshLaunchOptions = {}): Promise<Ds
 
     let child: ChildProcess;
     const env = { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' };
-    const args = ['web', '--host', '127.0.0.1', '--port', String(port)];
+    const args = buildDshWebArgs(port);
 
     try {
       if (isCmd) {
@@ -209,6 +218,7 @@ export async function launchLocalDsh(options: DshLaunchOptions = {}): Promise<Ds
     child.stdout?.on('data', (chunk: Buffer) => {
       if (settled) return;
       buffer += chunk.toString();
+      onLog?.(chunk.toString());
       const m = buffer.match(READY_PATTERN);
       if (m && m[1]) {
         url = m[1];
@@ -223,6 +233,7 @@ export async function launchLocalDsh(options: DshLaunchOptions = {}): Promise<Ds
 
     child.stderr?.on('data', (chunk: Buffer) => {
       stderrTail = (stderrTail + chunk.toString()).slice(-4000);
+      onLog?.(chunk.toString());
     });
 
     child.on('error', () => finish(null, 'dsh 子进程启动出错'));
@@ -259,7 +270,10 @@ async function probeUntilReady(url: string, timeoutMs: number): Promise<boolean>
 function killTree(child: ChildProcess): void {
   if (!child.pid) return;
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    // taskkill 走参数列表（无 shell）；pid 为子进程句柄的整数，唯一参数来源。
+    const pid = Math.trunc(Number(child.pid));
+    if (!Number.isInteger(pid) || pid <= 0) return;
+    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', shell: false });
   } else {
     try {
       child.kill('SIGTERM');

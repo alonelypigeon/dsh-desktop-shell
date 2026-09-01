@@ -13,6 +13,14 @@ export interface ExternalStopResult {
   detail: string;
 }
 
+// 已定位的本机服务器进程（resolve 与 terminate 之间可插入确认弹窗）。
+export interface ExternalServerTarget {
+  origin: string; // 如 http://127.0.0.1:3080
+  host: string; // 如 127.0.0.1:3080
+  port: number;
+  pids: number[];
+}
+
 // —— 纯函数：监听表输出解析（可单测） ——
 
 // Windows `netstat -ano` 行样例：
@@ -114,37 +122,51 @@ async function waitUntilDown(url: string, timeoutMs = 8000): Promise<boolean> {
   return false;
 }
 
-// 停止一个非本应用启动的本机 DSH 服务器。
-export async function stopExternalLocalServer(rawUrl: string): Promise<ExternalStopResult> {
+// 定位「非本应用启动」的本机服务器进程：校验地址 + 按端口查监听 PID。
+// 只定位不终止——调用方（main.ts）先向用户展示 PID 并确认，再调 terminate。
+export async function resolveExternalServerTarget(
+  rawUrl: string,
+): Promise<{ target: ExternalServerTarget } | { error: string }> {
   let u: URL;
   try {
     u = new URL(rawUrl);
   } catch {
-    return { ok: false, detail: `无效的地址：${rawUrl}` };
+    return { error: `无效的地址：${rawUrl}` };
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-    return { ok: false, detail: '仅支持 http/https 地址' };
+    return { error: '仅支持 http/https 地址' };
   }
   if (!isLoopbackHost(u.hostname)) {
-    return { ok: false, detail: '仅支持停止本机（回环地址）的服务器；远程服务器无法从本机关闭' };
+    return { error: '仅支持停止本机（回环地址）的服务器；远程服务器无法从本机关闭' };
   }
   if (!u.port) {
-    return { ok: false, detail: '该地址未指定端口，无法定位进程' };
+    return { error: '该地址未指定端口，无法定位进程' };
   }
   const port = Number(u.port);
 
   const pids = await findListeningPids(port);
   if (pids.length === 0) {
-    return { ok: false, detail: `未找到监听 ${u.host} 的服务器进程（可能已停止）` };
+    return { error: `未找到监听 ${u.host} 的服务器进程（可能已停止）` };
   }
+  return { target: { origin: u.origin, host: u.host, port, pids } };
+}
 
-  for (const pid of pids) killPid(pid);
+// 结束目标进程树并等待端口下线。
+export async function terminateExternalServer(target: ExternalServerTarget): Promise<ExternalStopResult> {
+  for (const pid of target.pids) killPid(pid);
 
-  if (await waitUntilDown(u.origin)) {
-    return { ok: true, detail: `本机 DSH 服务器已停止：${u.origin}（PID ${pids.join(', ')}）` };
+  if (await waitUntilDown(target.origin)) {
+    return { ok: true, detail: `本机 DSH 服务器已停止：${target.origin}（PID ${target.pids.join(', ')}）` };
   }
   return {
     ok: false,
-    detail: `已请求结束进程（PID ${pids.join(', ')}），但 ${u.host} 仍在响应——请手动确认`,
+    detail: `已请求结束进程（PID ${target.pids.join(', ')}），但 ${target.host} 仍在响应——请手动确认`,
   };
+}
+
+// 组合入口：定位并立即终止（无确认环节；需要确认弹窗的上层用 resolve + terminate）。
+export async function stopExternalLocalServer(rawUrl: string): Promise<ExternalStopResult> {
+  const resolved = await resolveExternalServerTarget(rawUrl);
+  if ('error' in resolved) return { ok: false, detail: resolved.error };
+  return terminateExternalServer(resolved.target);
 }

@@ -32,7 +32,9 @@ async function fetchWithTimeout(url: string, timeoutMs = PROBE_TIMEOUT_MS): Prom
   }
 }
 
-async function probe(url: string): Promise<boolean> {
+// 单实例指纹校验：index 特征 + 官方 favicon 双重确认。
+// 嗅探与「断开并关闭服务器」共用同一标准（后者用于关闭前的安全复核）。
+export async function isDshInstance(url: string): Promise<boolean> {
   try {
     const res = await fetchWithTimeout(url);
     if (res.status >= 500) return false;
@@ -70,7 +72,7 @@ export async function sniffLocalDsh(previousUrl?: string): Promise<SniffedInstan
   }
 
   const results = await Promise.all(
-    [...candidates.values()].map(async (url) => ((await probe(url)) ? { url } : null)),
+    [...candidates.values()].map(async (url) => ((await isDshInstance(url)) ? { url } : null)),
   );
 
   const found = results.filter((r): r is SniffedInstance => r !== null);

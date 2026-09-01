@@ -7,11 +7,16 @@ import { parseThemePreferenceJson, parseThemePreferenceYaml, type ThemePreferenc
 export type { ThemePreference } from './theme-prefs';
 
 // DSH 的 home：$DSH_HOME 或标准 ~/.dsh（DSH_HOME 环境变量对 GUI 进程可能不可见）。
+// 仅接受绝对路径：相对 DSH_HOME 会随进程 cwd 变化，读取没有稳定语义。
 function dshHomePath(): string | null {
-  if (process.env.DSH_HOME) return process.env.DSH_HOME;
+  const explicit = process.env.DSH_HOME;
+  if (explicit && path.isAbsolute(explicit)) return explicit;
   const defaultHome = path.join(os.homedir(), '.dsh');
   return fs.existsSync(defaultHome) ? defaultHome : null;
 }
+
+// DSH 配置文件名是受控枚举字面量（无 ../、无路径分隔符、无绝对路径）。
+const THEME_SETTING_FILES = ['settings.yaml', 'settings.yml', 'settings.json'] as const;
 
 // 从 DSH 的 settings.yaml 读取 ui-theme.preference（default: system）。
 // 解析逻辑在 theme-prefs.ts（纯函数，带单测）。
@@ -19,8 +24,10 @@ export function readDshThemePreference(): ThemePreference {
   const dshHome = dshHomePath();
   if (!dshHome) return 'system';
 
-  for (const name of ['settings.yaml', 'settings.yml', 'settings.json']) {
-    const p = path.join(dshHome, name);
+  for (const name of THEME_SETTING_FILES) {
+    // 文件名来自受控枚举（不可能越界）；仍显式校验解析结果落在 home 边界内。
+    const p = path.resolve(dshHome, name);
+    if (!p.startsWith(dshHome + path.sep)) continue;
     if (!fs.existsSync(p)) continue;
     try {
       const raw = fs.readFileSync(p, 'utf-8');

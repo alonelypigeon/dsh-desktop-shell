@@ -2,18 +2,22 @@ import { app } from 'electron';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import type { NotifyRequest } from './notify-queue';
 
 // 与 cordis 插件（DSH 进程内）共享的配置。两个独立进程通过读写同一个 JSON 文件通信：
 //   - url                桌面外壳要加载的 DSH web 地址
 //   - autoLaunch         期望的开机自启状态（Electron 轮询到变化后应用 setLoginItemSettings）
 //   - updateRequest      触发一次更新的时间戳（Electron 轮询到更大值后触发 checkForUpdates）
 //   - serviceStopRequest 停止本地服务的请求时间戳（/desktop stop 写入，Electron 轮询后停止）
+//   - notifyRequest      一次系统通知请求（cordis 插件 /desktop notify 写入，Electron
+//                        弹通知后清空；处理逻辑见 notify-queue.ts）
 //   - desktopExe         桌面应用可执行文件路径（cordis 插件 /desktop open 时 spawn 用）
 export interface SharedConfig {
   url?: string;
   autoLaunch?: boolean;
   updateRequest?: number;
   serviceStopRequest?: number;
+  notifyRequest?: NotifyRequest;
   desktopExe?: string;
 }
 
@@ -22,9 +26,11 @@ export interface SharedConfig {
 // 对 GUI 进程不可见也能对齐）> Electron userData。
 // cordis 插件侧读写 $DSH_HOME/desktop-shell.json，两侧因此对齐。
 export function sharedConfigPath(): string {
-  if (process.env.DSH_DESKTOP_CONFIG) return process.env.DSH_DESKTOP_CONFIG;
+  const explicit = process.env.DSH_DESKTOP_CONFIG;
+  // 显式覆盖仅接受绝对路径：相对路径会随进程 cwd 漂移，两侧（插件/外壳）对不上。
+  if (explicit && path.isAbsolute(explicit)) return explicit;
   const dshHome = process.env.DSH_HOME;
-  if (dshHome) return path.join(dshHome, 'desktop-shell.json');
+  if (dshHome && path.isAbsolute(dshHome)) return path.join(dshHome, 'desktop-shell.json');
   const defaultHome = path.join(os.homedir(), '.dsh');
   if (fs.existsSync(defaultHome)) return path.join(defaultHome, 'desktop-shell.json');
   return path.join(app.getPath('userData'), 'desktop-shell.json');
@@ -39,6 +45,10 @@ export function loadSharedConfig(): SharedConfig {
     if (typeof parsed.autoLaunch === 'boolean') out.autoLaunch = parsed.autoLaunch;
     if (typeof parsed.updateRequest === 'number') out.updateRequest = parsed.updateRequest;
     if (typeof parsed.serviceStopRequest === 'number') out.serviceStopRequest = parsed.serviceStopRequest;
+    const nr = parsed.notifyRequest;
+    if (nr && typeof nr === 'object' && typeof nr.id === 'string' && typeof nr.title === 'string' && typeof nr.body === 'string') {
+      out.notifyRequest = { id: nr.id, title: nr.title, body: nr.body, silent: nr.silent === true };
+    }
     if (typeof parsed.desktopExe === 'string') out.desktopExe = parsed.desktopExe;
     return out;
   } catch {
@@ -55,6 +65,14 @@ export function saveSharedConfig(patch: Partial<SharedConfig>): void {
   const tmp = sharedConfigPath() + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf-8');
   fs.renameSync(tmp, sharedConfigPath());
+  // POSIX 上收紧为属主可读写（该文件是本机进程间的信任边界，见 main.ts 的确认弹窗）。
+  if (process.platform !== 'win32') {
+    try {
+      fs.chmodSync(sharedConfigPath(), 0o600);
+    } catch {
+      /* 权限收紧失败不阻断保存 */
+    }
+  }
 }
 
 // 一次性迁移：早期版本把共享配置写进了 Electron userData（无 DSH_HOME 时），
