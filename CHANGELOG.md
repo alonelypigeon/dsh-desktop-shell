@@ -4,6 +4,17 @@
 （dsh-plugin-desktop-control / dsh-plugin-balance-panel / dsh-plugin-session-outline）
 已拆分为独立仓库，各自维护版本与变更记录。
 
+## [0.8.1] - 2026-09-02
+
+### 安全加固
+
+- **`desktopExe` 写入门槛**（Mimosa 中危发现：环境变量 → 共享配置 → 插件
+  spawn 的跨文件污点路径）：注册自身可执行路径到共享配置时，
+  `PORTABLE_EXECUTABLE_FILE` 仅在**打包构建**（`app.isPackaged`）+ **绝对路径** +
+  **目标文件真实存在**三重校验全过时才采用，否则一律回退自身 `execPath`——
+  开发态/被注入的相对路径/不存在的路径都无法把任意 spawn 目标写进共享配置
+  供 `/desktop open` 使用。
+
 ## [0.8.0] - 2026-09-01
 
 ### 新增

@@ -1933,9 +1933,10 @@ async function bootstrap(): Promise<void> {
     createTray();
 
     // 记录自身可执行路径，供 cordis 插件 /desktop open 时 spawn 使用。
-    // 仅接受绝对路径的 PORTABLE_EXECUTABLE_FILE（相对路径会随 cwd 漂移）；否则用自身 execPath。
-    const portable = process.env.PORTABLE_EXECUTABLE_FILE;
-    const exePath = portable && path.isAbsolute(portable) ? portable : process.execPath;
+    // PORTABLE_EXECUTABLE_FILE 三重门槛（防环境变量污点注入共享配置的 spawn 目标）：
+    // 仅打包构建 + 绝对路径 + 目标文件真实存在；任一不满足回退自身 execPath。
+    const portable = app.isPackaged ? process.env.PORTABLE_EXECUTABLE_FILE : undefined;
+    const exePath = portable && path.isAbsolute(portable) && fs.existsSync(portable) ? portable : process.execPath;
     saveSharedConfig({ desktopExe: exePath });
 
     setupAutoUpdater();
