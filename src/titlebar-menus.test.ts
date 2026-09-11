@@ -149,11 +149,13 @@ describe('buildMoreMenuItems', () => {
       calls,
       h: {
         palette: () => calls.push('palette'),
+        newWindow: () => calls.push('newwindow'),
         zoomIn: () => calls.push('in'),
         zoomOut: () => calls.push('out'),
         zoomReset: () => calls.push('reset'),
         shortcuts: () => calls.push('shortcuts'),
         toggleDnd: () => calls.push('dnd'),
+        toggleCloseBehavior: () => calls.push('closebehavior'),
         exportConnections: () => calls.push('export'),
         importConnections: () => calls.push('import'),
         showDiagnostics: () => calls.push('diagnostics'),
@@ -164,14 +166,16 @@ describe('buildMoreMenuItems', () => {
     };
   };
 
-  it('命令面板 / 检查更新 / 关于 / 快捷键设置 / 勿扰 checkbox / 缩放子菜单 / 退出', () => {
+  it('新建连接 / 命令面板 / 检查更新 / 关于 / 快捷键设置 / 关闭行为 / 勿扰 checkbox / 缩放子菜单 / 退出', () => {
     const { h } = mkHandlers();
     const items = buildMoreMenuItems({ zoomFactor: 1.25, dnd: false }, h);
     expect(items.map((i) => i.label)).toEqual([
+      '新建连接窗口…',
       '命令面板…',
       '检查更新…',
       '关于 DeepSeek Harness Shell…',
       '快捷键设置…',
+      '关闭时收进托盘（否则关闭该会话窗口）',
       '勿扰模式（静默通知）',
       '导出连接…',
       '导入连接…',
@@ -186,9 +190,19 @@ describe('buildMoreMenuItems', () => {
     };
     expect(zoom.submenu?.map((s) => s.label)).toEqual(['放大', '缩小', '重置为 100%']);
     // 命令面板项显示当前绑定加速器
-    expect(items[0].accelerator).toBeUndefined();
+    const paletteItem = items.find((i) => i.label === '命令面板…');
+    expect(paletteItem?.accelerator).toBeUndefined();
     const withAcc = buildMoreMenuItems({ accelerators: { palette: 'CommandOrControl+K' } }, h);
-    expect(withAcc[0].accelerator).toBe('CommandOrControl+K');
+    expect(withAcc.find((i) => i.label === '命令面板…')?.accelerator).toBe('CommandOrControl+K');
+  });
+
+  it('关闭行为 checkbox 勾选态随 state.closeBehavior', () => {
+    const { h } = mkHandlers();
+    const off = buildMoreMenuItems({ closeBehavior: 'close-session' }, h);
+    const on = buildMoreMenuItems({ closeBehavior: 'hide-to-tray' }, h);
+    const label = '关闭时收进托盘（否则关闭该会话窗口）';
+    expect(off.find((i) => i.label === label)?.checked).toBe(false);
+    expect(on.find((i) => i.label === label)?.checked).toBe(true);
   });
 
   it('勿扰 checkbox 勾选态随 state.dnd', () => {
@@ -216,7 +230,7 @@ describe('buildMoreMenuItems', () => {
     expect(subs.find((s) => s.label === '重置为 100%')?.accelerator).toBe('CommandOrControl+0');
   });
 
-  it('回调绑定：命令面板/更新/关于/快捷键/勿扰/缩放三项/退出', () => {
+  it('回调绑定：新建连接/命令面板/更新/关于/快捷键/关闭行为/勿扰/缩放三项/退出', () => {
     const { calls, h } = mkHandlers();
     const items = buildMoreMenuItems({ zoomFactor: 1 }, h);
     for (const item of items) {
@@ -225,7 +239,7 @@ describe('buildMoreMenuItems', () => {
         sub.click?.({} as never, {} as never, {} as never);
       }
     }
-    expect(calls).toEqual(['palette', 'update', 'about', 'shortcuts', 'dnd', 'export', 'import', 'diagnostics', 'in', 'out', 'reset', 'quit']);
+    expect(calls).toEqual(['newwindow', 'palette', 'update', 'about', 'shortcuts', 'closebehavior', 'dnd', 'export', 'import', 'diagnostics', 'in', 'out', 'reset', 'quit']);
   });
 });
 

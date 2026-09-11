@@ -715,6 +715,39 @@ body {
   border-radius: 4px;
   font: inherit;
 }
+/* 每连接代理（A5） */
+.conn-proxy {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  opacity: 0.7;
+  color: var(--ds-brand, #4d6bfe);
+}
+.proxy-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 2px;
+  padding: 8px;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 6px;
+  background: var(--ds-hover, rgba(0, 0, 0, 0.03));
+}
+.proxy-editor .proxy-input {
+  flex: 1 1 220px;
+  min-width: 160px;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+}
+.proxy-actions {
+  display: flex;
+  gap: 6px;
+  flex: 1 1 100%;
+}
 /* 勿扰时段（B3） */
 .settings-dnd {
   margin-top: 12px;

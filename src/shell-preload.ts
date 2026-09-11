@@ -16,6 +16,11 @@ export interface ShortcutsStatePayload {
   isMac: boolean;
 }
 
+/** 连接配置库下发到渲染层时的形态（附代理展示文案，见 proxy.ts）。 */
+export interface SavedConnectionView extends SavedConnection {
+  proxyLabel?: string;
+}
+
 contextBridge.exposeInMainWorld('shellWindow', {
   minimize: (): void => ipcRenderer.send('shell:minimize'),
   toggleMaximize: (): void => ipcRenderer.send('shell:toggle-maximize'),
@@ -119,14 +124,17 @@ contextBridge.exposeInMainWorld('shellWindow', {
     onRecentResult: (cb: (list: string[]) => void): void => {
       ipcRenderer.on('login:recent-result', (_e, v: string[]) => cb(v));
     },
-    // 命名连接配置库（A1）：请求 / 删除 / 重命名
+    // 命名连接配置库（A1）：请求 / 删除 / 重命名 / 每连接代理（A5）
     connections: {
       request: (): void => ipcRenderer.send('login:connections'),
       remove: (id: string): void => ipcRenderer.send('login:remove-connection', id),
       rename: (id: string, name: string): void => ipcRenderer.send('login:rename-connection', id, name),
       pin: (id: string): void => ipcRenderer.send('login:pin-connection', id),
-      onResult: (cb: (list: SavedConnection[]) => void): void => {
-        ipcRenderer.on('login:connections-result', (_e, v: SavedConnection[]) => cb(v));
+      /** 设置/清除该连接的代理；null 表示直连（清除代理）。 */
+      setProxy: (id: string, proxy: { url?: string; bypass?: string } | null): void =>
+        ipcRenderer.send('login:set-proxy', id, proxy),
+      onResult: (cb: (list: SavedConnectionView[]) => void): void => {
+        ipcRenderer.on('login:connections-result', (_e, v: SavedConnectionView[]) => cb(v));
       },
     },
     // 结果/进度订阅

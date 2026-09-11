@@ -1,7 +1,8 @@
 // 临时 UI 冒烟脚本：验证 shell 页面在外置 shell.css / shell.js + 收紧后的
 // CSP（script-src 'self'，无 unsafe-inline）下正常工作、连接状态竞态自愈、
 // 标题栏新按钮（置顶 / 服务器▾ / ⋯）的绑定、login 界面最近连接记录的
-// 删除交互，以及快捷键设置面板 / 页面内查找栏的桥接；
+// 删除交互、已保存连接的每连接代理编辑器（A5）与 setProxy 桥接归一化，
+// 以及快捷键设置面板 / 页面内查找栏的桥接；
 // 下拉菜单本身为原生 Menu.popup（无子窗口页面），模板构建由
 // titlebar-menus.test.ts / verify-url.mjs 覆盖。
 // 用法：node_modules\.bin\electron.cmd scripts/smoke-ui.mjs [截图目录]
@@ -13,6 +14,7 @@ import { buildDisconnectMenuItems, buildServerMenuItems, buildMoreMenuItems } fr
 import { pushShellUiState } from '../dist/shell-ui-state.js';
 import { DEFAULT_SHORTCUTS, SHORTCUT_ACTIONS, SHORTCUT_META, recordingOutcome, matchContentShortcut, normalizeAccelerator } from '../dist/shortcuts.js';
 import { stepZoom, normalizeZoom, formatFindCount } from '../dist/view-controls.js';
+import { describeProxyConfig, normalizeProxyConfig } from '../dist/proxy.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, '..', 'dist');
@@ -85,6 +87,11 @@ app.whenReady().then(async () => {
       if (e.sender !== win.webContents) return { ok: false };
       return { ok: true };
     });
+    // 设置面板同时拉取勿扰时段（无桩会打未注册 handler 错误）
+    ipcMain.handle('shell:dnd-schedule-get', (e) => {
+      if (e.sender !== win.webContents) return null;
+      return null;
+    });
     ipcMain.on('shell:settings-close', (e) => {
       if (e.sender !== win.webContents) return;
       settingsCloseCalls.push(1);
@@ -98,6 +105,31 @@ app.whenReady().then(async () => {
     ipcMain.on('shell:find-next', (e, dir) => {
       if (e.sender !== win.webContents) return;
       findNextCalls.push(dir);
+    });
+
+    // —— A5 每连接代理：已保存连接列表 + setProxy 桥接桩（模拟 main.ts 的
+    //    归一化入库 + 带 describeProxyConfig 文案回发） ——
+    let savedConns = [
+      { id: 'c1', name: '本地 DSH', url: 'http://127.0.0.1:3080/', kind: 'remote', lastUsed: Date.now() },
+    ];
+    const sendConnections = () => {
+      win.webContents.send('login:connections-result', savedConns.map((c) => ({
+        ...c,
+        proxyLabel: c.proxy ? describeProxyConfig(c.proxy) : '',
+      })));
+    };
+    const setProxyCalls = [];
+    let lastNormalized = null; // 最近一次归一化结果，供桥接断言
+    ipcMain.on('login:connections', (e) => {
+      if (e.sender !== win.webContents) return;
+      sendConnections();
+    });
+    ipcMain.on('login:set-proxy', (e, id, proxy) => {
+      if (e.sender !== win.webContents) return;
+      setProxyCalls.push({ id, proxy });
+      lastNormalized = proxy === null ? null : normalizeProxyConfig(proxy);
+      savedConns = savedConns.map((c) => (c.id === id ? { ...c, proxy: lastNormalized ?? undefined } : c));
+      sendConnections();
     });
 
     // —— 0. 竞态回归（真实场景复现）：connectTo 对本机服务几毫秒完成，
@@ -210,13 +242,15 @@ app.whenReady().then(async () => {
       JSON.stringify(serverItems.map((i) => i.label)),
     );
     const moreItems = buildMoreMenuItems(
-      { zoomFactor: 1.25, accelerators: DEFAULT_SHORTCUTS, dnd: false },
+      { zoomFactor: 1.25, accelerators: DEFAULT_SHORTCUTS, dnd: false, closeBehavior: 'close-session' },
       {
+        newWindow: noop,
         palette: noop,
         zoomIn: noop,
         zoomOut: noop,
         zoomReset: noop,
         shortcuts: noop,
+        toggleCloseBehavior: noop,
         toggleDnd: noop,
         exportConnections: noop,
         importConnections: noop,
@@ -228,10 +262,11 @@ app.whenReady().then(async () => {
     );
     const zoomSub = moreItems.find((i) => typeof i.label === 'string' && i.label.startsWith('缩放'));
     check(
-      'more 模板：命令面板/检查更新/关于/快捷键设置/勿扰/缩放子菜单(125% + 3 项)/退出',
-      moreItems.length === 12 &&
+      'more 模板：新建窗口/命令面板/检查更新/关于/快捷键/关闭收托盘/勿扰/导出导入/诊断/缩放子菜单(125%+3)/退出',
+      moreItems.length === 14 &&
+        moreItems[0].label === '新建连接窗口…' &&
         moreItems.some((i) => i.label === '命令面板…' && i.accelerator === 'CommandOrControl+K') &&
-        moreItems.some((i) => i.label === '快捷键设置…') &&
+        moreItems.find((i) => i.label?.startsWith('关闭时收进托盘'))?.checked === false &&
         moreItems.find((i) => i.label === '勿扰模式（静默通知）')?.checked === false &&
         zoomSub?.label === '缩放 125%' &&
         zoomSub?.submenu?.length === 3,
@@ -271,6 +306,143 @@ app.whenReady().then(async () => {
       JSON.stringify(recentInfo),
     );
 
+    // —— 4.5 A5 已保存连接 + 每连接代理编辑器（内联展开 → setProxy 桥接 → 徽标回显）——
+    // 第 0 节的「已连接」推送把 login 藏掉了：display:none 子树里 focus() 是
+    // 空操作。代理编辑器只在 login 可见时使用——先按真实路径恢复可见
+    //（onVisible 会顺带发起 connections 请求，列表随之渲染）。
+    win.webContents.send('login:visible', true);
+    await sleep(300);
+    const connRow = await win.webContents.executeJavaScript(`(() => ({
+      rows: document.querySelectorAll('#connections .recent-row').length,
+      name: document.querySelector('#connections .conn-name')?.textContent ?? null,
+      url: document.querySelector('#connections .inst .conn-url')?.textContent ?? null,
+      buttons: Array.from(document.querySelectorAll('#connections .recent-row .icon-btn')).map((b) => b.textContent),
+    }))()`, true);
+    check(
+      '已保存连接：渲染 1 行（名称 + 地址 + ★⇄✎× 四按钮）',
+      connRow.rows === 1 &&
+        connRow.name === '本地 DSH' &&
+        connRow.url === 'http://127.0.0.1:3080/' &&
+        JSON.stringify(connRow.buttons) === JSON.stringify(['★', '⇄', '✎', '×']),
+      JSON.stringify(connRow),
+    );
+
+    // ⇄ 打开内联编辑器：两个输入框（地址框自动聚焦）+ 保存/直连/取消
+    await win.webContents.executeJavaScript(
+      `document.querySelectorAll('#connections .recent-row .icon-btn')[1].click(); true`,
+      true,
+    );
+    await sleep(150);
+    const editor = await win.webContents.executeJavaScript(`(() => {
+      const box = document.querySelector('#connections .proxy-editor');
+      const inputs = box ? box.querySelectorAll('.proxy-input') : [];
+      const btns = box ? box.querySelectorAll('.ghost-btn') : [];
+      return {
+        open: !!box,
+        inputs: inputs.length,
+        focused: inputs.length > 0 && document.activeElement === inputs[0],
+        save: btns[0]?.textContent ?? null,
+        direct: btns[1]?.textContent ?? null,
+        cancel: btns[2]?.textContent ?? null,
+      };
+    })()`, true);
+    check(
+      '代理编辑器：⇄ 内联展开、地址输入框聚焦、保存/直连/取消三动作',
+      editor.open && editor.inputs === 2 && editor.focused &&
+        editor.save === '保存代理' && editor.direct === '直连（清除代理）' && editor.cancel === '取消',
+      JSON.stringify(editor),
+    );
+
+    // 填入 socks 代理 + 绕过列表 → 保存 → IPC 收到原始载荷 → 主进程归一化回发
+    await win.webContents.executeJavaScript(`(() => {
+      const inputs = document.querySelectorAll('#connections .proxy-editor .proxy-input');
+      inputs[0].value = 'socks5://127.0.0.1:7897';
+      inputs[1].value = 'localhost, *.internal';
+      document.querySelector('#connections .proxy-editor .ghost-btn').click();
+      return true;
+    })()`, true);
+    await sleep(250); // IPC 往返 + 列表重渲染
+    const savedCall = setProxyCalls[0];
+    check(
+      '保存代理：setProxy IPC 收到 id + 原始 {url, bypass} 载荷',
+      savedCall && savedCall.id === 'c1' && savedCall.proxy &&
+        savedCall.proxy.url === 'socks5://127.0.0.1:7897' &&
+        savedCall.proxy.bypass === 'localhost, *.internal',
+      JSON.stringify(savedCall),
+    );
+    check(
+      '桥接归一化：normalizeProxyConfig 接受渲染层原始载荷（socks 模式 + 2 条绕过）',
+      lastNormalized && lastNormalized.mode === 'socks' &&
+        lastNormalized.url === 'socks5://127.0.0.1:7897' && lastNormalized.bypass.length === 2,
+      JSON.stringify(lastNormalized),
+    );
+    const tag1 = await win.webContents.executeJavaScript(`(() => ({
+      tag: document.querySelector('#connections .conn-proxy')?.textContent ?? null,
+      editorGone: !document.querySelector('#connections .proxy-editor'),
+    }))()`, true);
+    check(
+      '保存后回发：行上出现 SOCKS 展示徽标（绕过计数）且编辑器收起',
+      tag1.tag === 'SOCKS 127.0.0.1:7897（绕过 2 条）' && tag1.editorGone,
+      JSON.stringify(tag1),
+    );
+
+    // 再次打开：已有配置回显
+    await win.webContents.executeJavaScript(
+      `document.querySelectorAll('#connections .recent-row .icon-btn')[1].click(); true`,
+      true,
+    );
+    await sleep(150);
+    const prefill = await win.webContents.executeJavaScript(`(() => {
+      const inputs = document.querySelectorAll('#connections .proxy-editor .proxy-input');
+      return inputs.length === 2 ? [inputs[0].value, inputs[1].value] : null;
+    })()`, true);
+    check(
+      '再次打开编辑器：回显已保存的地址与绕过列表',
+      Array.isArray(prefill) &&
+        prefill[0] === 'socks5://127.0.0.1:7897' &&
+        prefill[1] === 'localhost, *.internal',
+      JSON.stringify(prefill),
+    );
+
+    // 直连（清除代理）：null 载荷 + 徽标消失
+    await win.webContents.executeJavaScript(
+      `document.querySelectorAll('#connections .proxy-editor .ghost-btn')[1].click(); true`,
+      true,
+    );
+    await sleep(250);
+    const tag2 = await win.webContents.executeJavaScript(`(() => ({
+      tag: document.querySelector('#connections .conn-proxy')?.textContent ?? null,
+      editorGone: !document.querySelector('#connections .proxy-editor'),
+    }))()`, true);
+    check(
+      '直连按钮：setProxy 收到 null，回发后徽标消失',
+      setProxyCalls.length === 2 && setProxyCalls[1].proxy === null && tag2.tag === null && tag2.editorGone,
+      JSON.stringify({ calls: setProxyCalls.length, ...tag2 }),
+    );
+
+    // 取消：编辑器收起且不产生 IPC
+    await win.webContents.executeJavaScript(
+      `document.querySelectorAll('#connections .recent-row .icon-btn')[1].click(); true`,
+      true,
+    );
+    await sleep(100);
+    await win.webContents.executeJavaScript(`(() => {
+      const inputs = document.querySelectorAll('#connections .proxy-editor .proxy-input');
+      if (inputs[0]) inputs[0].value = 'http://should-not-save:1';
+      document.querySelectorAll('#connections .proxy-editor .ghost-btn')[2].click();
+      return true;
+    })()`, true);
+    await sleep(150);
+    const cancelled = await win.webContents.executeJavaScript(
+      `!document.querySelector('#connections .proxy-editor')`,
+      true,
+    );
+    check(
+      '取消按钮：编辑器收起且不发送 setProxy',
+      cancelled === true && setProxyCalls.length === 2,
+      'calls=' + setProxyCalls.length + ' gone=' + cancelled,
+    );
+
     // —— 5. 外置样式表生效（CSP style-src 'self' 下 <link> 可加载）——
     const styleOk = await win.webContents.executeJavaScript(`(() => {
       const el = document.querySelector('.conn-url');
@@ -289,8 +461,8 @@ app.whenReady().then(async () => {
       envHintHidden: document.getElementById('settings-env-hint').hidden,
     }))()`, true);
     check(
-      '快捷键面板：打开后渲染 8 个动作（含命令面板） + 全局热键显示 Ctrl+Shift+D',
-      settingsInfo.visible && settingsInfo.rowCount === 8 && settingsInfo.firstBind === 'Ctrl+Shift+D' && settingsInfo.envHintHidden,
+      '快捷键面板：打开后渲染 12 个动作（8 原有 + 4 个 v1.0 全局热键） + 全局热键显示 Ctrl+Shift+D',
+      settingsInfo.visible && settingsInfo.rowCount === 12 && settingsInfo.firstBind === 'Ctrl+Shift+D' && settingsInfo.envHintHidden,
       JSON.stringify(settingsInfo),
     );
 

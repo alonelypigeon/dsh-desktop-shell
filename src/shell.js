@@ -499,6 +499,61 @@
   // —— 命名连接配置库（A1）：显示名称+地址，支持删除与重命名 ——
   var connectionsEl = document.getElementById('connections');
   var currentConnections = [];
+
+  // A5：每连接代理编辑（内联展开，不弹系统对话框）。
+  function openProxyEditor(row, conn) {
+    var existing = row.querySelector('.proxy-editor');
+    if (existing) { existing.remove(); return; }
+    var box = document.createElement('div');
+    box.className = 'proxy-editor';
+    var urlInput = document.createElement('input');
+    urlInput.type = 'text';
+    urlInput.className = 'proxy-input';
+    urlInput.spellcheck = false;
+    urlInput.placeholder = 'socks5://127.0.0.1:7897';
+    urlInput.value = (conn.proxy && conn.proxy.url) || '';
+    var bypassInput = document.createElement('input');
+    bypassInput.type = 'text';
+    bypassInput.className = 'proxy-input';
+    bypassInput.spellcheck = false;
+    bypassInput.placeholder = '绕过：localhost, *.internal（逗号分隔，可留空）';
+    bypassInput.value = (conn.proxy && conn.proxy.bypass ? conn.proxy.bypass.join(', ') : '');
+    var actions = document.createElement('div');
+    actions.className = 'proxy-actions';
+    var saveBtn = document.createElement('button');
+    saveBtn.className = 'ghost-btn';
+    saveBtn.textContent = '保存代理';
+    saveBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      window.shellWindow.login.connections.setProxy(conn.id, {
+        url: urlInput.value.trim(),
+        bypass: bypassInput.value,
+      });
+    });
+    var directBtn = document.createElement('button');
+    directBtn.className = 'ghost-btn';
+    directBtn.textContent = '直连（清除代理）';
+    directBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      window.shellWindow.login.connections.setProxy(conn.id, null);
+    });
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'ghost-btn';
+    cancelBtn.textContent = '取消';
+    cancelBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      box.remove();
+    });
+    actions.appendChild(saveBtn);
+    actions.appendChild(directBtn);
+    actions.appendChild(cancelBtn);
+    box.appendChild(urlInput);
+    box.appendChild(bypassInput);
+    box.appendChild(actions);
+    row.appendChild(box);
+    urlInput.focus();
+  }
+
   function renderConnections(list) {
     currentConnections = Array.isArray(list) ? list : [];
     connectionsEl.textContent = '';
@@ -525,6 +580,13 @@
       urlEl.textContent = conn.url;
       b.appendChild(nameEl);
       b.appendChild(urlEl);
+      if (conn.proxyLabel) {
+        var proxyTag = document.createElement('span');
+        proxyTag.className = 'conn-proxy';
+        proxyTag.textContent = conn.proxyLabel;
+        proxyTag.title = '该连接使用独立代理（每连接独立会话）';
+        b.appendChild(proxyTag);
+      }
       b.addEventListener('click', function () { window.shellWindow.login.joinRemote(conn.url); });
       row.appendChild(b);
       var pinBtn = document.createElement('button');
@@ -534,6 +596,17 @@
       pinBtn.setAttribute('aria-label', '置顶 ' + (conn.name || conn.url));
       pinBtn.addEventListener('click', function () { window.shellWindow.login.connections.pin(conn.id); });
       row.appendChild(pinBtn);
+      // A5：每连接代理（每连接独立 partition，代理只影响该连接的窗口）
+      var proxyBtn = document.createElement('button');
+      proxyBtn.className = 'icon-btn';
+      proxyBtn.textContent = '⇄';
+      proxyBtn.title = conn.proxyLabel ? '代理：' + conn.proxyLabel + '（点击修改）' : '设置该连接的代理…';
+      proxyBtn.setAttribute('aria-label', '设置代理 ' + (conn.name || conn.url));
+      proxyBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openProxyEditor(row, conn);
+      });
+      row.appendChild(proxyBtn);
       var renameBtn = document.createElement('button');
       renameBtn.className = 'icon-btn';
       renameBtn.textContent = '✎';

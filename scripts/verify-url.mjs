@@ -280,11 +280,13 @@ test('buildMoreMenuItems 快捷键设置入口与缩放子菜单', () => {
     { zoomFactor: 1.25, accelerators: DEFAULT_SHORTCUTS, dnd: true },
     {
       palette: noop,
+      newWindow: noop,
       zoomIn: noop,
       zoomOut: noop,
       zoomReset: noop,
       shortcuts: noop,
       toggleDnd: noop,
+      toggleCloseBehavior: noop,
       exportConnections: noop,
       importConnections: noop,
       showDiagnostics: noop,
@@ -293,10 +295,12 @@ test('buildMoreMenuItems 快捷键设置入口与缩放子菜单', () => {
       quit: noop,
     },
   );
-  assert.equal(items.length, 12);
+  assert.equal(items.length, 14);
+  assert.ok(items.some((i) => i.label === '新建连接窗口…'));
   assert.ok(items.some((i) => i.label === '快捷键设置…'));
   assert.ok(items.some((i) => i.label === '命令面板…' && i.accelerator === 'CommandOrControl+K'));
   assert.equal(items.find((i) => i.label === '勿扰模式（静默通知）')?.checked, true);
+  assert.equal(items.find((i) => i.label === '关闭时收进托盘（否则关闭该会话窗口）')?.checked, false);
   const zoom = items.find((i) => typeof i.label === 'string' && i.label.startsWith('缩放'));
   assert.equal(zoom.label, '缩放 125%');
   assert.equal(zoom.submenu.length, 3);

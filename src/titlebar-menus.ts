@@ -91,6 +91,8 @@ export interface ServerMenuHandlers {
   reloadHard: () => void;
   /** 未连接时传 null（隐藏「在浏览器中打开」项）。 */
   openInBrowser: (() => void) | null;
+  /** 连接健康面板（A3：ping / 版本 / 进程 / 端口 PID）。 */
+  health?: () => void;
 }
 
 export function buildServerMenuItems(
@@ -123,6 +125,9 @@ export function buildServerMenuItems(
   if (state.connectedUrl && handlers.openInBrowser) {
     items.push({ label: '在浏览器中打开当前服务器', click: handlers.openInBrowser });
   }
+  if (connected && handlers.health) {
+    items.push({ type: 'separator' }, { label: '连接健康…', click: handlers.health });
+  }
   return items;
 }
 
@@ -135,11 +140,15 @@ export interface MoreMenuState {
   accelerators?: MenuAccelerators;
   /** 勿扰模式是否开启（checkbox 勾选态）。 */
   dnd?: boolean;
+  /** 标题栏 ✕ 的行为（v1.0 可配置）。 */
+  closeBehavior?: 'close-session' | 'hide-to-tray';
 }
 
 export interface MoreMenuHandlers {
   /** 呼出/收起命令面板（Ctrl+K，可重绑）。 */
   palette: () => void;
+  /** 打开一个新的 login 窗口（多窗口「新建连接…」）。 */
+  newWindow: () => void;
   zoomIn: () => void;
   zoomOut: () => void;
   zoomReset: () => void;
@@ -147,6 +156,8 @@ export interface MoreMenuHandlers {
   shortcuts: () => void;
   /** 切换勿扰模式（静默系统通知，徽章保留）。 */
   toggleDnd: () => void;
+  /** 切换标题栏 ✕ 的行为（关闭会话窗口 / 收进托盘）。 */
+  toggleCloseBehavior: () => void;
   /** 导出命名连接配置（JSON，A4）。 */
   exportConnections: () => void;
   /** 导入命名连接配置（JSON，A4）。 */
@@ -163,10 +174,17 @@ export function buildMoreMenuItems(
   handlers: MoreMenuHandlers,
 ): MenuItemConstructorOptions[] {
   return [
+    { label: '新建连接窗口…', click: handlers.newWindow },
     { label: '命令面板…', accelerator: acc(state.accelerators?.palette), click: handlers.palette },
     { label: '检查更新…', click: handlers.checkUpdates },
     { label: '关于 DeepSeek Harness Shell…', click: handlers.about },
     { label: '快捷键设置…', click: handlers.shortcuts },
+    {
+      type: 'checkbox',
+      label: '关闭时收进托盘（否则关闭该会话窗口）',
+      checked: state.closeBehavior === 'hide-to-tray',
+      click: handlers.toggleCloseBehavior,
+    },
     {
       type: 'checkbox',
       label: '勿扰模式（静默通知）',

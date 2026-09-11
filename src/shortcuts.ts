@@ -10,6 +10,10 @@
 
 export type ShortcutAction =
   | 'global-toggle-window'
+  | 'global-next-session'
+  | 'global-close-window'
+  | 'global-restart-local'
+  | 'global-stop-all-local'
   | 'palette'
   | 'find'
   | 'reload'
@@ -29,6 +33,10 @@ export interface ShortcutMeta {
 // 展示顺序（设置面板分组：全局在前，内容视图按使用频率排列）
 export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
   'global-toggle-window',
+  'global-next-session',
+  'global-close-window',
+  'global-restart-local',
+  'global-stop-all-local',
   'palette',
   'find',
   'reload',
@@ -41,7 +49,27 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
 export const SHORTCUT_META: Record<ShortcutAction, ShortcutMeta> = {
   'global-toggle-window': {
     label: '唤起 / 收起窗口',
-    description: '全局热键，任何应用下可用',
+    description: '全局热键：唤起最近活跃的会话窗口（无窗口时开一个）',
+    scope: 'global',
+  },
+  'global-next-session': {
+    label: '切换到下一个会话',
+    description: '全局热键：在所有会话窗口之间轮换聚焦',
+    scope: 'global',
+  },
+  'global-close-window': {
+    label: '关闭当前会话窗口',
+    description: '全局热键：关闭当前前台会话窗口（托盘常驻不受影响）',
+    scope: 'global',
+  },
+  'global-restart-local': {
+    label: '重启本地服务',
+    description: '全局热键：重启由本应用启动的本地 DSH 服务',
+    scope: 'global',
+  },
+  'global-stop-all-local': {
+    label: '停止所有本地服务',
+    description: '全局热键：一次性停止全部由本应用启动的本地 DSH 服务（带确认）',
     scope: 'global',
   },
   palette: {
@@ -86,6 +114,10 @@ export type ShortcutBindings = Record<ShortcutAction, string | null>;
 
 export const DEFAULT_SHORTCUTS: ShortcutBindings = {
   'global-toggle-window': 'CommandOrControl+Shift+D',
+  'global-next-session': 'CommandOrControl+Alt+N',
+  'global-close-window': 'CommandOrControl+Alt+W',
+  'global-restart-local': 'CommandOrControl+Alt+R',
+  'global-stop-all-local': 'CommandOrControl+Alt+S',
   palette: 'CommandOrControl+K',
   find: 'CommandOrControl+F',
   reload: 'CommandOrControl+R',

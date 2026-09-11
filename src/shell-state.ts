@@ -7,6 +7,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { normalizeZoom } from './view-controls';
 import { validateUrl } from './url';
+import { normalizeProxyConfig, type ProxyConfig } from './proxy';
 
 export interface WindowBounds {
   x: number;
@@ -31,7 +32,13 @@ export interface ShellState {
   /** 定时勿扰时段（B3：start/end 为 HH:MM，支持跨天）。 */
   dndSchedule?: DndSchedule;
   dnd?: boolean;
+  /** 上次退出时打开的会话窗口地址（v1.0：启动时按此恢复，最多 5 个）。 */
+  sessionWindows?: string[];
+  /** 标题栏 ✕ 的行为（v1.0 可配置）：关闭该会话窗口 / 隐藏到托盘。 */
+  closeBehavior?: CloseBehavior;
 }
+
+export type CloseBehavior = 'close-session' | 'hide-to-tray';
 
 export type ConnectionKind = 'local-start' | 'sniffed' | 'remote';
 
@@ -42,6 +49,16 @@ export interface SavedConnection {
   kind: ConnectionKind;
   lastUsed?: number;
   createdAt?: number;
+  /** 该连接窗口的位置/尺寸（多窗口下每个连接各记一份；旧单值字段迁移为默认值）。 */
+  bounds?: WindowBounds;
+  /** 该连接窗口上次是否最大化。 */
+  maximized?: boolean;
+  /** 该连接内容视图的缩放系数（0.5–2）。 */
+  zoomFactor?: number;
+  /** 该连接窗口是否置顶。 */
+  alwaysOnTop?: boolean;
+  /** 每连接代理（A5；见 proxy.ts）。 */
+  proxy?: ProxyConfig;
 }
 
 export interface DndSchedule {
@@ -110,6 +127,26 @@ export function normalizeSavedConnection(raw: unknown): SavedConnection | null {
   const out: SavedConnection = { id, name, url: normalizedUrl, kind };
   if (typeof r.lastUsed === 'number' && Number.isFinite(r.lastUsed)) out.lastUsed = r.lastUsed;
   if (typeof r.createdAt === 'number' && Number.isFinite(r.createdAt)) out.createdAt = r.createdAt;
+  // 多窗口（v1.0）：每个连接各记一份窗口状态与代理配置。
+  if (r.bounds && typeof r.bounds === 'object') {
+    const b = r.bounds as Partial<WindowBounds>;
+    if (
+      typeof b.x === 'number' &&
+      typeof b.y === 'number' &&
+      typeof b.width === 'number' &&
+      typeof b.height === 'number' &&
+      [b.x, b.y, b.width, b.height].every((n) => Number.isFinite(n))
+    ) {
+      out.bounds = { x: b.x, y: b.y, width: b.width, height: b.height };
+    }
+  }
+  if (typeof r.maximized === 'boolean') out.maximized = r.maximized;
+  if (typeof r.zoomFactor === 'number' && Number.isFinite(r.zoomFactor)) {
+    out.zoomFactor = normalizeZoom(r.zoomFactor);
+  }
+  if (typeof r.alwaysOnTop === 'boolean') out.alwaysOnTop = r.alwaysOnTop;
+  const proxy = normalizeProxyConfig(r.proxy);
+  if (proxy) out.proxy = proxy;
   return out;
 }
 
@@ -143,13 +180,44 @@ export function migrateConnections(raw: {
 }
 
 // 新增/更新连接：按 URL 去重并置顶，返回新列表（上限 cap 条）。
+// 已存在的条目保留其窗口状态/代理配置（调用方只传连接本身时不应把用户的
+// 窗口位置、缩放、代理设置清掉）。
 export function mergeSavedConnection(
   prev: SavedConnection[] | undefined,
   conn: SavedConnection,
   cap = 50,
 ): SavedConnection[] {
-  const next = [conn, ...(prev ?? []).filter((c) => c.id !== conn.id && c.url !== conn.url)];
+  const list = prev ?? [];
+  const old = list.find((c) => c.id === conn.id || c.url === conn.url);
+  const merged: SavedConnection = old
+    ? {
+        ...old,
+        ...conn,
+        bounds: conn.bounds ?? old.bounds,
+        zoomFactor: conn.zoomFactor ?? old.zoomFactor,
+        alwaysOnTop: conn.alwaysOnTop ?? old.alwaysOnTop,
+        proxy: conn.proxy ?? old.proxy,
+      }
+    : conn;
+  const next = [merged, ...list.filter((c) => c.id !== merged.id && c.url !== merged.url)];
   return next.slice(0, cap);
+}
+
+// 更新一条连接的窗口状态/代理（找不到就原样返回；多窗口各写各的条目）。
+export function updateSavedConnection(
+  prev: SavedConnection[] | undefined,
+  id: string,
+  patch: Partial<Pick<SavedConnection, 'bounds' | 'maximized' | 'zoomFactor' | 'alwaysOnTop' | 'proxy' | 'name'>>,
+): SavedConnection[] {
+  return (prev ?? []).map((c) => (c.id === id ? { ...c, ...patch } : c));
+}
+
+// 置顶一条连接（最近使用时间更新 + 移到列表首位）。
+export function pinConnection(prev: SavedConnection[] | undefined, id: string, now = Date.now()): SavedConnection[] {
+  const list = prev ?? [];
+  const target = list.find((c) => c.id === id);
+  if (!target) return list;
+  return [{ ...target, lastUsed: now }, ...list.filter((c) => c.id !== id)];
 }
 
 // 删除连接（按 id 或按 url 均可）。
@@ -286,6 +354,12 @@ export function loadShellState(file: string): ShellState {
       const s = normalizeDndSchedule(raw.dndSchedule);
       if (s) out.dndSchedule = s;
     }
+    if (Array.isArray(raw.sessionWindows)) {
+      out.sessionWindows = raw.sessionWindows.filter((u): u is string => typeof u === 'string');
+    }
+    if (raw.closeBehavior === 'close-session' || raw.closeBehavior === 'hide-to-tray') {
+      out.closeBehavior = raw.closeBehavior;
+    }
     return out;
   } catch {
     return {};
@@ -293,12 +367,16 @@ export function loadShellState(file: string): ShellState {
 }
 
 export function saveShellState(file: string, patch: Partial<ShellState>): void {
-  const current = loadShellState(file);
-  const next: ShellState = { ...current, ...patch };
+  writeShellState(file, { ...loadShellState(file), ...patch });
+}
+
+// 直接写入一份完整状态（不重新读盘）。多窗口下多个会话各自保存窗口状态，
+// 「读-改-写」会让并发写入互相覆盖，所以由调用方持有内存态、统一落盘。
+export function writeShellState(file: string, state: ShellState): void {
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
   const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf-8');
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf-8');
   fs.renameSync(tmp, file);
   // 状态文件含最近连接地址等个人信息，POSIX 上收紧为属主可读写。
   if (process.platform !== 'win32') {

@@ -17,8 +17,8 @@ publish:
   provider: github
   owner: alonelypigeon
   repo: dsh-desktop-shell
-  # 测试期发布均为 pre-release（正式版发布时改为 release）。
-  releaseType: prerelease
+  # v1.0.0 起走正式发布（此前测试期均为 pre-release）。
+  releaseType: release
   # 分阶段灰度（可选保险丝）：取消注释后该构建的更新只推给指定比例的用户，
   # 也可在发布后手动编辑 Release 里的 latest*.yml 加 `stagingPercentage: 10`。
   # stagingPercentage: 10
@@ -26,6 +26,14 @@ publish:
 files:
   - dist/**/*
   - package.json
+  # 源码映射只对本地调试有用，不进安装包（dist 里 24 个 .map ≈ 131 KB）。
+  - '!dist/**/*.map'
+
+# 只保留实际用得到的 Chromium 语言包（默认打全部 ~50 种，是安装包里
+# 除 Electron 运行时之外最大的一块可回收空间）。
+electronLanguages:
+  - en-US
+  - zh-CN
 
 asar: true
 compression: maximum

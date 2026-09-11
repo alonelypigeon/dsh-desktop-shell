@@ -33,6 +33,7 @@ export function buildPaletteEntries(state: PaletteState): PaletteEntry[] {
     entries.push({ id: `connect:${i}`, label: `连接 ${url}`, group: '连接', hint: i === 0 ? '最近' : undefined });
   });
   entries.push({ id: 'switch-server', label: '切换服务器…', group: '连接' });
+  entries.push({ id: 'new-window', label: '新建连接窗口…', group: '连接' });
   entries.push(
     state.ownedRunning
       ? { id: 'stop-local', label: '停止本地 DSH 服务', group: '连接' }
@@ -46,6 +47,7 @@ export function buildPaletteEntries(state: PaletteState): PaletteEntry[] {
     entries.push({ id: 'reload', label: '重新加载页面', group: '视图' });
     entries.push({ id: 'reload-hard', label: '强制重新加载（忽略缓存）', group: '视图' });
     entries.push({ id: 'find', label: '页面内查找', group: '视图' });
+    entries.push({ id: 'health', label: '连接健康…', group: '视图' });
   }
   const pct = zoomPercent(state.zoomFactor ?? ZOOM_DEFAULT);
   entries.push({ id: 'zoom-in', label: '放大页面', hint: `当前 ${pct}%`, group: '视图' });
