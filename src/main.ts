@@ -972,6 +972,13 @@ const host: SessionHost = {
     updateTray();
     // 所有窗口都关掉了仍常驻托盘：托盘菜单里的「打开窗口」会新建 login 窗口。
   },
+  // 窗口级 IPC 只注册一次、按来源路由（session.ts registerIpcOnce）。
+  sessionForSender: (sender) => {
+    for (const s of sessions.values()) {
+      if (s.ownsSender(sender)) return s;
+    }
+    return null;
+  },
   isQuitting: () => isQuitting,
   closeBehavior: () => closeBehavior,
   toggleCloseBehavior: () => {

@@ -105,6 +105,8 @@ export interface SessionHost {
   openLoginSession(): void;
   /** 会话窗口已销毁，请从注册表移除并刷新托盘。 */
   onSessionGone(session: Session): void;
+  /** 按 event.sender 找属主会话（窗口级 IPC 只注册一次、按来源路由）。 */
+  sessionForSender(sender: Electron.WebContents): Session | null;
   /** 应用是否正在退出（退出流程中放行窗口关闭）。 */
   isQuitting(): boolean;
   /** 标题栏 ✕ 的行为设置。 */
@@ -155,6 +157,8 @@ let loginWindowSeq = 0;
  * 未连接的会话窗口显示 login 界面。
  */
 export class Session {
+  /** 窗口级 IPC 是否已注册（应用生命周期内仅一批监听器，见 registerIpcOnce）。 */
+  private static sessionIpcRegistered = false;
   /** 会话键：连接的规范化 URL；login 窗口在连上之前用临时键。 */
   private idValue: string;
   get id(): string {
@@ -224,7 +228,7 @@ export class Session {
       },
     });
     this.wireWindow(init);
-    this.registerIpc();
+    Session.registerIpcOnce(this.host);
     void this.window.loadFile(path.join(__dirname, 'shell.html'), {
       query: { dark: this.currentThemeDark ? '1' : '0' },
     });
@@ -1167,121 +1171,145 @@ export class Session {
     if (!this.window.isDestroyed()) this.window.destroy();
   }
 
-  // —— 窗口级 IPC（全部校验 event.sender，只作用于本窗口） ——
-
-  private registerIpc(): void {
-    const win = this.window;
-    const guard = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean =>
-      event.sender === win.webContents;
+  // —— 窗口级 IPC ——
+  //
+  // 应用生命周期内只注册一批监听器（不是每会话注册）：ipcMain.handle 对同一
+  // 通道注册两次会直接 throw（v1.0.0 事故——注册放在每会话路径后，启动恢复
+  // ≥2 个窗口必崩），ipcMain.on 的重复监听器还会随窗口开关不断累积。
+  // 路由按 event.sender 找属主会话，sender 校验语义与旧的 guard 等价。
+  private static registerIpcOnce(host: SessionHost): void {
+    if (Session.sessionIpcRegistered) return;
+    Session.sessionIpcRegistered = true;
+    const owner = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): Session | null =>
+      host.sessionForSender(event.sender);
 
     // 窗口控制
     ipcMainOn('shell:minimize', (e) => {
-      if (guard(e)) win.minimize();
+      owner(e)?.window.minimize();
     });
     ipcMainOn('shell:toggle-maximize', (e) => {
-      if (!guard(e)) return;
-      if (win.isMaximized()) win.unmaximize();
-      else win.maximize();
+      const s = owner(e);
+      if (!s) return;
+      if (s.window.isMaximized()) s.window.unmaximize();
+      else s.window.maximize();
     });
     ipcMainOn('shell:close', (e) => {
-      if (guard(e)) win.close();
+      owner(e)?.window.close();
     });
     ipcMainOn('shell:toggle-always-on-top', (e) => {
-      if (guard(e)) this.setAlwaysOnTop(!this.alwaysOnTop);
+      const s = owner(e);
+      if (s) s.setAlwaysOnTop(!s.alwaysOnTop);
     });
 
     // login：嗅探 / 启动本地服务 / 连接 / 最近连接 / 配置库
     ipcMainOn('login:sniff', (e) => {
-      if (!guard(e)) return;
+      const s = owner(e);
+      if (!s) return;
       void (async () => {
         const { sniffLocalDsh } = await import('./sniffer');
         const { loadSharedConfig } = await import('./shared-config');
-        this.send('login:sniff-result', await sniffLocalDsh(loadSharedConfig().url));
+        s.send('login:sniff-result', await sniffLocalDsh(loadSharedConfig().url));
       })();
     });
     ipcMainOn('login:start-local', (e, port: unknown) => {
-      if (!guard(e)) return;
+      const s = owner(e);
+      if (!s) return;
       const normalized = normalizeRequestedPort(port);
       if (normalized === null) {
-        this.showLoginError('端口无效：请输入 1-65535 之间的整数');
+        s.showLoginError('端口无效：请输入 1-65535 之间的整数');
         return;
       }
-      void this.host.startLocalService(this, normalized);
+      void s.host.startLocalService(s, normalized);
     });
     ipcMainOn('login:join-remote', (e, rawUrl: unknown) => {
-      if (!guard(e)) return;
-      void this.joinRemoteUrl(typeof rawUrl === 'string' ? rawUrl : '');
+      const s = owner(e);
+      if (!s) return;
+      void s.joinRemoteUrl(typeof rawUrl === 'string' ? rawUrl : '');
     });
     ipcMainOn('login:recent', (e) => {
-      if (guard(e)) this.send('login:recent-result', this.host.recentUrls());
+      const s = owner(e);
+      if (s) s.send('login:recent-result', s.host.recentUrls());
     });
     ipcMainOn('login:connections', (e) => {
-      if (guard(e)) this.sendConnectionsResult();
+      const s = owner(e);
+      if (s) s.sendConnectionsResult();
     });
     ipcMainOn('login:remove-recent', (e, rawUrl: unknown) => {
-      if (!guard(e)) return;
+      const s = owner(e);
+      if (!s) return;
       const url = typeof rawUrl === 'string' ? rawUrl : '';
       if (!url) return;
-      this.host.forgetRecent(url);
-      this.send('login:recent-result', this.host.recentUrls());
+      s.host.forgetRecent(url);
+      s.send('login:recent-result', s.host.recentUrls());
     });
     ipcMainOn('login:clear-recent', (e) => {
-      if (!guard(e)) return;
-      this.host.clearRecent();
-      this.send('login:recent-result', this.host.recentUrls());
+      const s = owner(e);
+      if (!s) return;
+      s.host.clearRecent();
+      s.send('login:recent-result', s.host.recentUrls());
     });
     ipcMainOn('login:remove-connection', (e, id: unknown) => {
-      if (!guard(e) || typeof id !== 'string') return;
-      this.host.removeConnection(id);
-      this.sendConnectionsResult();
-      this.send('login:recent-result', this.host.recentUrls());
+      const s = owner(e);
+      if (!s || typeof id !== 'string') return;
+      s.host.removeConnection(id);
+      s.sendConnectionsResult();
+      s.send('login:recent-result', s.host.recentUrls());
     });
     ipcMainOn('login:rename-connection', (e, id: unknown, name: unknown) => {
-      if (!guard(e) || typeof id !== 'string' || typeof name !== 'string') return;
-      this.host.renameConnection(id, name);
-      this.sendConnectionsResult();
+      const s = owner(e);
+      if (!s || typeof id !== 'string' || typeof name !== 'string') return;
+      s.host.renameConnection(id, name);
+      s.sendConnectionsResult();
     });
     ipcMainOn('login:pin-connection', (e, id: unknown) => {
-      if (!guard(e) || typeof id !== 'string') return;
-      this.host.pinConnection(id);
-      this.sendConnectionsResult();
+      const s = owner(e);
+      if (!s || typeof id !== 'string') return;
+      s.host.pinConnection(id);
+      s.sendConnectionsResult();
     });
     ipcMainOn('login:set-proxy', (e, id: unknown, raw: unknown) => {
-      if (!guard(e) || typeof id !== 'string') return;
-      this.host.setConnectionProxy(id, raw);
-      this.sendConnectionsResult();
+      const s = owner(e);
+      if (!s || typeof id !== 'string') return;
+      s.host.setConnectionProxy(id, raw);
+      s.sendConnectionsResult();
     });
 
     // 断开
     ipcMainOn('shell:disconnect', (e) => {
-      if (guard(e)) this.disconnect();
+      const s = owner(e);
+      if (s) s.disconnect();
     });
     ipcMainOn('shell:disconnect-stop', (e) => {
-      if (guard(e)) this.disconnectAndStop();
+      const s = owner(e);
+      if (s) s.disconnectAndStop();
     });
 
     // 页面内查找
     ipcMainOn('shell:find', (e, text: unknown) => {
-      if (!guard(e) || !this.contentView) return;
-      this.lastFindText = typeof text === 'string' ? text : '';
-      if (this.lastFindText === '') {
-        this.contentView.webContents.stopFindInPage('clearSelection');
-        this.send('shell:find-result', '');
+      const s = owner(e);
+      if (!s || !s.contentView) return;
+      s.lastFindText = typeof text === 'string' ? text : '';
+      if (s.lastFindText === '') {
+        s.contentView.webContents.stopFindInPage('clearSelection');
+        s.send('shell:find-result', '');
         return;
       }
-      this.contentView.webContents.findInPage(this.lastFindText, { forward: true });
+      s.contentView.webContents.findInPage(s.lastFindText, { forward: true });
     });
     ipcMainOn('shell:find-next', (e, dir: unknown) => {
-      if (!guard(e) || !this.contentView || this.lastFindText === '') return;
-      this.contentView.webContents.findInPage(this.lastFindText, { forward: dir !== -1, findNext: true });
+      const s = owner(e);
+      if (!s || !s.contentView || s.lastFindText === '') return;
+      s.contentView.webContents.findInPage(s.lastFindText, { forward: dir !== -1, findNext: true });
     });
     ipcMainOn('shell:find-close', (e) => {
-      if (guard(e)) this.closeFindBar();
+      const s = owner(e);
+      if (s) s.closeFindBar();
     });
 
     // 标题栏下拉菜单
     ipcMainOn('shell:open-titlebar-menu', (e, name: unknown, anchor: unknown) => {
-      if (!guard(e) || !isTitlebarMenuName(name)) return;
+      const s = owner(e);
+      if (!s || !isTitlebarMenuName(name)) return;
       if (!anchor || typeof anchor !== 'object') return;
       const r = anchor as { x?: unknown; y?: unknown; width?: unknown; height?: unknown };
       if (
@@ -1293,71 +1321,84 @@ export class Session {
       ) {
         return;
       }
-      this.openTitlebarMenu(name, { x: r.x, y: r.y, width: r.width, height: r.height });
+      s.openTitlebarMenu(name, { x: r.x, y: r.y, width: r.width, height: r.height });
     });
 
     // 快捷键设置面板
     ipcMainHandle('shell:shortcuts-get', (e) => {
-      if (!guard(e)) return null;
-      this.pushShortcutsState();
+      const s = owner(e);
+      if (!s) return null;
+      s.pushShortcutsState();
       return true;
     });
     ipcMainHandle('shell:shortcuts-record', (e, action: unknown, raw: unknown) => {
-      if (!guard(e) || !isShortcutAction(action)) return { ok: false, error: '无效动作' };
-      const ev = this.normalizeRawKeyEvent(raw);
+      const s = owner(e);
+      if (!s || !isShortcutAction(action)) return { ok: false, error: '无效动作' };
+      const ev = s.normalizeRawKeyEvent(raw);
       if (ev === null) return { ok: false, error: '无效按键事件' };
       const outcome = recordingOutcome(ev);
       if (outcome.kind === 'pending') return { ok: true, pending: true };
       if (outcome.kind === 'cancel') return { ok: true, cancelled: true };
       if (outcome.kind === 'clear') {
-        this.host.setShortcut(action, null);
-        this.pushShortcutsState();
+        s.host.setShortcut(action, null);
+        s.pushShortcutsState();
         return { ok: true, cleared: true };
       }
       if (outcome.kind === 'invalid') return { ok: false, error: outcome.reason };
-      const others = conflictsFor(action, outcome.accelerator, this.host.shortcuts().bindings);
+      const others = conflictsFor(action, outcome.accelerator, s.host.shortcuts().bindings);
       if (others.length > 0) {
         const names = others.map((a) => SHORTCUT_META[a].label).join('、');
         return { ok: false, error: `与「${names}」的快捷键冲突` };
       }
-      this.host.setShortcut(action, outcome.accelerator);
-      this.pushShortcutsState();
+      s.host.setShortcut(action, outcome.accelerator);
+      s.pushShortcutsState();
       return { ok: true };
     });
     ipcMainHandle('shell:shortcuts-reset', (e, scope: unknown) => {
-      if (!guard(e)) return { ok: false, error: '无效请求' };
+      const s = owner(e);
+      if (!s) return { ok: false, error: '无效请求' };
       if (scope === 'all') {
-        this.host.resetShortcut('all');
-        this.pushShortcutsState();
+        s.host.resetShortcut('all');
+        s.pushShortcutsState();
         return { ok: true };
       }
       if (!isShortcutAction(scope)) return { ok: false, error: '无效动作' };
-      this.host.resetShortcut(scope);
-      this.pushShortcutsState();
+      s.host.resetShortcut(scope);
+      s.pushShortcutsState();
       return { ok: true };
     });
     ipcMainOn('shell:settings-close', (e) => {
-      if (guard(e)) this.closeSettings();
+      const s = owner(e);
+      if (s) s.closeSettings();
     });
     ipcMainHandle('shell:dnd-schedule-get', (e) => {
-      if (!guard(e)) return null;
-      return this.host.dndSchedule();
+      const s = owner(e);
+      if (!s) return null;
+      return s.host.dndSchedule();
     });
     ipcMainOn('shell:dnd-schedule-set', (e, raw: unknown) => {
-      if (!guard(e)) return;
-      this.host.setDndSchedule(raw);
+      const s = owner(e);
+      if (!s) return;
+      s.host.setDndSchedule(raw);
     });
 
     // 命令面板
     ipcMainOn('shell:palette-run', (e, id: unknown) => {
-      if (!guard(e) || typeof id !== 'string') return;
-      if (!this.paletteModel.some((en) => en.id === id)) return;
-      this.closePalette();
-      this.runPaletteAction(id);
+      const s = owner(e);
+      if (!s || typeof id !== 'string') return;
+      if (!s.paletteModel.some((en) => en.id === id)) return;
+      s.closePalette();
+      s.runPaletteAction(id);
     });
     ipcMainOn('shell:palette-close', (e) => {
-      if (guard(e)) this.closePalette();
+      const s = owner(e);
+      if (s) s.closePalette();
     });
+  }
+
+  /** 窗口级 IPC 路由用：该 sender 是否本会话窗口。 */
+  ownsSender(sender: Electron.WebContents): boolean {
+    return !this.destroyedWindow && this.window.webContents === sender;
   }
 }
 

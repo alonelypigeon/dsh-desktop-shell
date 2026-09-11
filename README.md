@@ -88,6 +88,8 @@ npm run test:node           # Node 原生 runner（scripts/verify-url.mjs，不�
                             # 可在无子进程 spawn 的受限环境运行；会先编译 dist）
 node scripts/verify-server-stop.mjs   # 「关闭服务器」端到端（需 spawn：子进程起 dummy
                             # 服务器 → 按端口定位结束 → 确认端口停止；见 server-stop.ts）
+node_modules\.bin\electron.cmd scripts/verify-multi-window.mjs   # 多窗口启动回归
+                            #  （恢复 ≥2 个会话窗口不崩溃；需 GUI，Electron 直跑）
 node_modules\.bin\electron.cmd scripts/smoke-ui.mjs   # UI 冒烟（需先 build：竞态自愈 /
                             #  菜单/快捷键面板/查找栏桥接/A5 代理编辑器；Electron 直跑，见脚本头注释）
 ```

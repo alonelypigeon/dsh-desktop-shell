@@ -4,6 +4,23 @@
 （dsh-plugin-desktop-control / dsh-plugin-balance-panel / dsh-plugin-session-outline）
 已拆分为独立仓库，各自维护版本与变更记录。
 
+## [1.0.1] - 2026-09-11
+
+### 修复
+
+- **多窗口启动崩溃（v1.0.0 回归，热修）**：v1.0.0 的 Session 抽取把窗口级 IPC 注册
+  放进了每会话路径，而 `ipcMain.handle` 对同一通道注册第二次会直接 throw
+  （"Attempted to register a second handler for 'shell:shortcuts-get'"）——启动
+  恢复 ≥2 个会话窗口、或任何时刻开第二个窗口都会弹错误框并退出；单窗口场景
+  不受影响，因此打包冒烟未能拦截。改为**应用生命周期内只注册一批监听器、按
+  `event.sender` 路由到属主会话**（`Session.registerIpcOnce` +
+  `sessionForSender`），sender 校验语义与原实现等价；顺带修掉
+  `ipcMain.on` 重复监听器随窗口开关累积泄漏的隐患。新增
+  `scripts/verify-multi-window.mjs` 回归：隔离 userData 预置两条恢复记录 +
+  本地假 DSH 保证第一个窗口连接成功（否则第二个 URL 会复用 login 窗口、
+  无法触发新建 Session），劫持 `dialog.showErrorBox` 把崩溃变成退出码断言——
+  v1.0.0 代码上稳定复现（exit 42），修复后 2 窗口 PASS。
+
 ## [1.0.0] - 2026-09-11
 
 ### 新增
