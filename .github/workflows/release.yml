@@ -7,9 +7,12 @@
 #      APPLE_TEAM_ID，并开启 CSC_LINK/CSC_KEY_PASSWORD（或暂不签名发布）。
 #   4. git tag v0.5.1 && git push origin v0.5.1
 #
-# 注意 job 顺序：electron-builder --publish always 在 release 不存在时会创建它，
-# 三个平台并行跑会竞争创建、产生重复 Release（v0.5.0 事故）。因此 Windows 先行
-# 创建 Release（含 latest.yml），macOS/Linux 依赖它完成后再附加各自的产物。
+# 注意 job 顺序与发布权：只有 Windows job 允许 --publish always（创建 Release，
+# 含 latest.yml）。macOS/Linux 一律只构建、不发布，产物用 gh release upload
+# 按 tag 附加到既有 Release——electron-builder 自己的发布逻辑会「按 tag 查找
+# Release、找不到就新建」，查找偶发落空就会造出第二个同 tag Release
+# （v0.5.0、v1.0.0 两次事故，needs: 串行化挡不住它）。gh release upload
+# 找不到 Release 会直接报错失败，绝不会悄悄新建；--clobber 支持重跑覆盖。
 name: release
 
 on:
@@ -40,13 +43,18 @@ jobs:
       - name: Build & package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # 全工作流唯一的 Release 创建/发布者（含 latest.yml）；macOS/Linux 只构建。
         run: npx electron-builder --win --publish always
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist-windows
-          path: release/*.{exe,yml,blockmap}
+          # upload-artifact 的 glob 不支持 {} 花括号展开（一条多模式会静默匹配 0 个文件）
+          path: |
+            release/*.exe
+            release/*.yml
+            release/*.blockmap
           if-no-files-found: ignore
 
   build-macos:
@@ -75,13 +83,29 @@ jobs:
           # APPLE_ID: ${{ secrets.APPLE_ID }}
           # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder --mac --publish always
+        # 只构建不发布：发布权在 build-windows（见文件头注释）。
+        run: npx electron-builder --mac
+
+      - name: Attach to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" --clobber \
+            release/*.dmg \
+            release/*.zip \
+            release/*.dmg.blockmap \
+            release/*.zip.blockmap \
+            release/latest-mac.yml
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist-macos
-          path: release/*.{dmg,yml,blockmap,zip}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
+            release/latest-mac.yml
           if-no-files-found: ignore
 
   build-linux:
@@ -104,11 +128,24 @@ jobs:
       - name: Build & package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --linux --publish always
+        # 只构建不发布：发布权在 build-windows（见文件头注释）。
+        run: npx electron-builder --linux
+
+      - name: Attach to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" --clobber \
+            release/*.AppImage \
+            release/*.deb \
+            release/latest-linux.yml
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist-linux
-          path: release/*.{AppImage,deb,yml}
+          path: |
+            release/*.AppImage
+            release/*.deb
+            release/latest-linux.yml
           if-no-files-found: ignore
