@@ -51,6 +51,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         # 唯一的 Release 创建点（幂等：重跑时已存在则跳过）。
+        # Windows runner 默认 pwsh：>/dev/null 会被当写文件、\ 续行不生效，
+        # 涉及 gh 的多行命令一律显式 bash。
+        shell: bash
         run: |
           gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME"
@@ -64,6 +67,7 @@ jobs:
       - name: Attach to Release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           gh release upload "$GITHUB_REF_NAME" --clobber \
             release/*.exe \
