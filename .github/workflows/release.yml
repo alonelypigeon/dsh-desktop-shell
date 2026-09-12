@@ -7,15 +7,19 @@
 #      APPLE_TEAM_ID，并开启 CSC_LINK/CSC_KEY_PASSWORD（或暂不签名发布）。
 #   4. git tag v0.5.1 && git push origin v0.5.1
 #
-# 注意 job 顺序与发布权：只有 Windows job 允许 --publish always（创建 Release，
-# 含 latest.yml）。macOS/Linux 一律「--publish never 只构建」，产物用
-# gh release upload 按 tag 附加到既有 Release。两个坑都踩过：
+# 注意发布权：electron-builder 完全不碰 GitHub（三平台一律 --publish never）。
+# Release 由 Windows job 的 gh release create 显式创建（唯一创建点），各平台
+# 产物用 gh release upload 按 tag 附加。三个踩过的坑：
 # 1) electron-builder 的发布逻辑会「按 tag 查找 Release、找不到就新建」，
 #    查找偶发落空就造出第二个同 tag Release（v0.5.0 事故，needs: 挡不住）；
 # 2) CI 的 tag 构建下 --publish 缺省是 onTag——光删掉 --publish always 并
-#    不能阻止它自行发布，v1.0.1 事故。必须显式 --publish never。
+#    不能阻止它自行发布（v1.0.1 事故），必须显式 never；
+# 3) 就算只有 Windows job 用 --publish always，它内部的并行上传任务也会
+#    竞态创建出两个 Release 对象（v1.0.0/v1.0.1/v1.0.2 三连，第二对象
+#    总是装着 Setup blockmap）。所以发布只能走 gh：create 一次 + upload --clobber。
 # gh release upload 找不到 Release 会直接报错失败，绝不会悄悄新建；
-# --clobber 支持重跑覆盖。
+# --clobber 支持重跑覆盖。产物名见 electron-builder.yml：一律连字符
+# （GitHub 把资产名里的空格替换成点号，与 latest.yml 的连字符引用错位）。
 name: release
 
 on:
@@ -43,11 +47,28 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # 唯一的 Release 创建点（幂等：重跑时已存在则跳过）。
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME"
+
       - name: Build & package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # 全工作流唯一的 Release 创建/发布者（含 latest.yml）；macOS/Linux 只构建。
-        run: npx electron-builder --win --publish always
+        # 只构建不发布（发布权归 gh release create，见文件头注释）。
+        run: npx electron-builder --win --publish never
+
+      - name: Attach to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" --clobber \
+            release/*.exe \
+            release/*.exe.blockmap \
+            release/latest.yml
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

@@ -67,10 +67,12 @@ nsis:
   deleteAppDataOnUninstall: false
   shortcutName: DeepSeek Harness Shell
   # 稳定的产物名：自动更新的 latest.yml/blockmap 依赖文件名可预测。
-  artifactName: ${productName}-Setup-${version}.${ext}
+  # 一律显式连字符命名——${productName} 含空格，GitHub 会把资产名里的
+  # 空格替换成点号，而 latest.yml 写的是连字符名，错位会让更新下载 404。
+  artifactName: DeepSeek-Harness-Shell-Setup-${version}.${ext}
 
 portable:
-  artifactName: ${productName}-Portable-${version}.${ext}
+  artifactName: DeepSeek-Harness-Shell-Portable-${version}.${ext}
 
 mac:
   target:
@@ -78,7 +80,7 @@ mac:
     - zip
   icon: build/icon.png
   category: public.app-category.developer-tools
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  artifactName: DeepSeek-Harness-Shell-${version}-${arch}.${ext}
   # dsh-shell:// 深链协议（Windows 由应用运行时注册，Linux 需桌面入口声明）。
   protocols:
     - name: DeepSeek Harness Shell URL
@@ -91,5 +93,7 @@ linux:
     - deb
   icon: build/icon.png
   category: Utility
+  # 显式连字符命名（理由同 nsis，AppImage 资产名不含空格/点号歧义）。
+  artifactName: DeepSeek-Harness-Shell-${version}.${ext}
   # deb 元数据要求 maintainer（发布前改成你自己的名字/邮箱）。
   maintainer: dsh-desktop-shell contributors <dsh-desktop-shell@users.noreply.github.com>
