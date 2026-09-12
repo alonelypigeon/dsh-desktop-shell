@@ -11,6 +11,28 @@ function isPortableBuild(): boolean {
   return Boolean(process.env.PORTABLE_EXECUTABLE_FILE);
 }
 
+// 「检查更新」的用户可见反馈只在用户主动检查时给出（manualCheck 门控）：
+// 启动期的自动检查失败保持静默——离线/无法直连 GitHub 时启动不该被弹窗打扰。
+let manualCheck = false;
+
+// 检查失败的用户可见反馈。promise 拒绝与 error 事件可能同时上报，
+// 靠 manualCheck 标志保证只弹一次。
+function showCheckError(message: string): void {
+  void dialog
+    .showMessageBox({
+      type: 'warning',
+      title: '检查更新失败',
+      message: '无法连接更新源（GitHub）',
+      detail: `${message}\n\n请检查网络或系统代理后重试；也可以直接打开 Releases 页手动下载。`,
+      buttons: ['打开下载页', '关闭'],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    .then((r) => {
+      if (r.response === 0) openExternalSafe(RELEASES_PAGE);
+    });
+}
+
 // releaseNotes 可能是 string / {note} / {url}（GitHub provider 下通常是 release
 // body 字符串）。统一剥成纯文本，弹窗里可读。
 function releaseNotesText(raw: unknown): string {
@@ -45,7 +67,15 @@ export function checkForUpdatesNow(): void {
     })();
     return;
   }
-  void autoUpdater.checkForUpdates().catch((e) => console.error('[updater] check failed:', e.message));
+  manualCheck = true;
+  void autoUpdater.checkForUpdates().catch((e) => {
+    if (manualCheck) {
+      manualCheck = false;
+      showCheckError(e.message);
+    } else {
+      console.error('[updater] check failed:', e.message);
+    }
+  });
 }
 
 // 自动更新：仅在打包后生效。dev 环境跳过，避免影响开发。
@@ -82,6 +112,7 @@ export function setupAutoUpdater(): void {
     autoUpdater.autoInstallOnAppQuit = false;
 
     autoUpdater.on('update-available', (info) => {
+      manualCheck = false; // 已有「发现新版本」弹窗作为反馈，复位门控
       void (async () => {
         const notes = releaseNotesText((info as { releaseNotes?: unknown }).releaseNotes);
         const r = await dialog.showMessageBox({
@@ -97,7 +128,19 @@ export function setupAutoUpdater(): void {
         });
         if (r.response === 0) {
           if (r.checkboxChecked) autoUpdater.autoInstallOnAppQuit = true;
-          void autoUpdater.downloadUpdate().catch((e) => console.error('[updater] download failed:', e));
+          void autoUpdater.downloadUpdate().catch((e) => {
+            console.error('[updater] download failed:', e);
+            // 用户主动点了「下载」，失败必须可见（网络中断在此阶段很常见）。
+            void dialog.showMessageBox({
+              type: 'warning',
+              title: '下载失败',
+              message: '更新包下载失败',
+              detail: `${e instanceof Error ? e.message : String(e)}\n\n可稍后重试，或打开 Releases 页手动下载。`,
+              buttons: ['打开下载页', '关闭'],
+              defaultId: 1,
+              cancelId: 1,
+            });
+          });
         }
       })();
     });
@@ -121,7 +164,27 @@ export function setupAutoUpdater(): void {
       })();
     });
 
-    autoUpdater.on('error', (e) => console.error('[updater] error:', e.message));
+    // 无更新：只在用户主动检查时反馈（启动自动检查保持静默）。
+    autoUpdater.on('update-not-available', (info) => {
+      if (!manualCheck) return;
+      manualCheck = false;
+      void dialog.showMessageBox({
+        type: 'info',
+        title: '检查更新',
+        message: `已是最新版本（v${info.version}）`,
+        buttons: ['确定'],
+      });
+    });
+
+    // 失败：promise 拒绝与 error 事件可能同时上报，manualCheck 保证只弹一次；
+    // 启动期自动检查失败仅记日志。
+    autoUpdater.on('error', (e) => {
+      console.error('[updater] error:', e.message);
+      if (manualCheck) {
+        manualCheck = false;
+        showCheckError(e.message);
+      }
+    });
 
     // 默认源已固定为 electron-builder.yml 的 GitHub Releases（打包进 app-update.yml）。
     void autoUpdater.checkForUpdates().catch(() => {
