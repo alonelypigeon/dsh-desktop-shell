@@ -8,11 +8,14 @@
 #   4. git tag v0.5.1 && git push origin v0.5.1
 #
 # 注意 job 顺序与发布权：只有 Windows job 允许 --publish always（创建 Release，
-# 含 latest.yml）。macOS/Linux 一律只构建、不发布，产物用 gh release upload
-# 按 tag 附加到既有 Release——electron-builder 自己的发布逻辑会「按 tag 查找
-# Release、找不到就新建」，查找偶发落空就会造出第二个同 tag Release
-# （v0.5.0、v1.0.0 两次事故，needs: 串行化挡不住它）。gh release upload
-# 找不到 Release 会直接报错失败，绝不会悄悄新建；--clobber 支持重跑覆盖。
+# 含 latest.yml）。macOS/Linux 一律「--publish never 只构建」，产物用
+# gh release upload 按 tag 附加到既有 Release。两个坑都踩过：
+# 1) electron-builder 的发布逻辑会「按 tag 查找 Release、找不到就新建」，
+#    查找偶发落空就造出第二个同 tag Release（v0.5.0 事故，needs: 挡不住）；
+# 2) CI 的 tag 构建下 --publish 缺省是 onTag——光删掉 --publish always 并
+#    不能阻止它自行发布，v1.0.1 事故。必须显式 --publish never。
+# gh release upload 找不到 Release 会直接报错失败，绝不会悄悄新建；
+# --clobber 支持重跑覆盖。
 name: release
 
 on:
@@ -83,8 +86,10 @@ jobs:
           # APPLE_ID: ${{ secrets.APPLE_ID }}
           # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        # 只构建不发布：发布权在 build-windows（见文件头注释）。
-        run: npx electron-builder --mac
+        # 只构建不发布（发布权在 build-windows，见文件头注释）。注意必须显式
+        # never：CI 的 tag 构建下 --publish 缺省是 onTag，electron-builder 仍会
+        # 自行发布并可能另建 Release（v1.0.1 第二次事故）。
+        run: npx electron-builder --mac --publish never
 
       - name: Attach to Release
         env:
@@ -128,8 +133,9 @@ jobs:
       - name: Build & package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # 只构建不发布：发布权在 build-windows（见文件头注释）。
-        run: npx electron-builder --linux
+        # 只构建不发布（发布权在 build-windows，见文件头注释）。同样必须显式
+        # never：CI 的 tag 构建下 --publish 缺省是 onTag。
+        run: npx electron-builder --linux --publish never
 
       - name: Attach to Release
         env:
