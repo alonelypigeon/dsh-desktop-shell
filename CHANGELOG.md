@@ -4,6 +4,20 @@
 （dsh-plugin-desktop-control / dsh-plugin-balance-panel / dsh-plugin-session-outline）
 已拆分为独立仓库，各自维护版本与变更记录。
 
+## [1.0.3] - 2026-09-12
+
+### 变更
+
+- **发布管线加固**（无应用功能变化）：连续三个版本（v1.0.0/1/2）出现同一 tag
+  两个 Release 对象的事故后，发布链路彻底脱离 electron-builder 发布器——
+  三平台一律 `--publish never` 只构建，Release 由 CI 用 `gh release create`
+  显式创建一次、产物经 `gh release upload --clobber` 附加（根因链：
+  publisher「找不到就新建」的查找竞态 → `onTag` 缺省 → Windows job 并行
+  上传竞态，三个坑逐一踩实后全数堵死）。产物名弃用含空格的
+  `${productName}` 模板、改显式连字符：GitHub 会把资产名里的空格替换成
+  点号，与 latest.yml 的连字符引用错位会让更新下载 404。下载文件名
+  更统一（如 `DeepSeek-Harness-Shell-Setup-1.0.3.exe`）。
+
 ## [1.0.2] - 2026-09-12
 
 ### 修复
